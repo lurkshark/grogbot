@@ -1,8 +1,4 @@
-## Purpose
-
-Define the initial placeholder package for the `goblin` tool within the monorepo.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Goblin placeholder package
 The repository SHALL include a workspace package named `@grogbot/goblin` that provides the RSS-to-markdown CLI tool.

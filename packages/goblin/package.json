@@ -1,11 +1,23 @@
 {
-  "name": "goblin",
+  "name": "@grogbot/goblin",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "goblin": "dist/cli.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "rss-parser": "^3.13.0",
+    "turndown": "^7.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/turndown": "^5.0.6",
+    "typescript": "^5.9.3"
   }
 }

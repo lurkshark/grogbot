@@ -43,3 +43,11 @@ source: https://example.com/feed.xml
 - `author`: Optional author value from the feed.
 - `categories`: Optional category list.
 - `source`: Feed URL.
+
+## Testing
+
+Offline integration tests use repository-local RSS fixtures and do not require network access.
+
+```
+pnpm --filter @grogbot/goblin test
+```

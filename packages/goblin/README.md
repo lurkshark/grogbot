@@ -5,14 +5,14 @@ CLI tool to scrape an RSS feed and export posts as markdown files with YAML fron
 ## Usage
 
 ```
-goblin scrape <feed-url> [--out <dir>] [--overwrite] [--limit <n>]
+goblin scrape <feed-url> [--out <dir>] [--overwrite] [--max-posts <n>]
 ```
 
 ### Options
 
 - `--out`, `-o`: Output directory (defaults to current working directory).
 - `--overwrite`: Overwrite existing files (default: skip existing).
-- `--limit`: Limit number of items processed.
+- `--max-posts`, `-m`: Maximum number of posts to scrape (default: 100).
 
 ## Output format
 

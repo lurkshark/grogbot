@@ -5,12 +5,12 @@ type ParsedArgs = {
   values: {
     out?: string;
     overwrite?: boolean;
-    limit?: number;
+    "max-posts"?: string;
   };
   positionals: string[];
 };
 
-const USAGE = `goblin scrape <feed-url> [--out <dir>] [--overwrite] [--limit <n>]`;
+const USAGE = `goblin scrape <feed-url> [--out <dir>] [--overwrite] [--max-posts <n>]`;
 
 export async function run(argv: string[]): Promise<void> {
   const [command, ...rest] = argv;
@@ -34,8 +34,9 @@ export async function run(argv: string[]): Promise<void> {
       overwrite: {
         type: "boolean",
       },
-      limit: {
+      "max-posts": {
         type: "string",
+        short: "m",
       },
     },
   }) as ParsedArgs;
@@ -45,16 +46,19 @@ export async function run(argv: string[]): Promise<void> {
     throw new Error("Missing feed URL.");
   }
 
-  const limitText = parsed.values.limit;
-  const limitValue = limitText ? Number(limitText) : undefined;
-  if (limitText && (!Number.isFinite(limitValue ?? 0) || (limitValue ?? 0) <= 0)) {
-    throw new Error("--limit must be a positive number.");
+  const maxPostsText = parsed.values["max-posts"];
+  const maxPostsValue = maxPostsText ? Number(maxPostsText) : undefined;
+  if (
+    maxPostsText &&
+    (!Number.isFinite(maxPostsValue ?? 0) || (maxPostsValue ?? 0) <= 0)
+  ) {
+    throw new Error("--max-posts must be a positive number.");
   }
 
   const options: ScrapeOptions = {
     outputDir: parsed.values.out,
     overwrite: Boolean(parsed.values.overwrite),
-    limit: limitValue,
+    maxPosts: maxPostsValue,
   };
 
   const summary = await scrapeFeed(feedUrl, options);

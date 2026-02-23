@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import { ingestDirectory } from "./ingest.js";
 
-const DEFAULT_MODEL = "Qwen/Qwen3-Embedding-0.6B";
+const DEFAULT_MODEL = "Xenova/all-MiniLM-L6-v2";
 
 const USAGE = "alchemist ingest <dir> [--model <name>]";
 

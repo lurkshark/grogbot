@@ -10,7 +10,7 @@ alchemist ingest <dir> [--model <name>]
 
 ### Options
 
-- `--model`, `-m`: HuggingFace embedding model name (default: `Qwen/Qwen3-Embedding-0.6B`).
+- `--model`, `-m`: HuggingFace embedding model name (default: `Xenova/all-MiniLM-L6-v2`).
 
 ## Behavior
 

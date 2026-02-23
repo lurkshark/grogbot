@@ -74,7 +74,7 @@ test("CLI defaults to Qwen embedding model when omitted", async () => {
 
     await run(["ingest", inputDir]);
 
-    assert.equal(capturedModel, "Qwen/Qwen3-Embedding-0.6B");
+    assert.equal(capturedModel, "Xenova/all-MiniLM-L6-v2");
   } finally {
     __test__.resetFactories();
     await rm(inputDir, { recursive: true, force: true });

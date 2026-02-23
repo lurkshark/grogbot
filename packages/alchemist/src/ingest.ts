@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { HuggingFaceTransformersEmbeddings } from "@langchain/community/embeddings/hf_transformers";
+import { HuggingFaceTransformersEmbeddings } from "@langchain/community/embeddings/huggingface_transformers";
 import { LanceDB } from "@langchain/community/vectorstores/lancedb";
 import { Document } from "@langchain/core/documents";
 import { connect } from "@lancedb/lancedb";
@@ -85,11 +85,11 @@ type VectorStoreOptions = {
   tableName: string;
 };
 
-type EmbeddingsFactory = (modelName: string) => HuggingFaceTransformersEmbeddings;
+type EmbeddingsFactory = (model: string) => HuggingFaceTransformersEmbeddings;
 
-let embeddingsFactory: EmbeddingsFactory = (modelName) =>
+let embeddingsFactory: EmbeddingsFactory = (model) =>
   new HuggingFaceTransformersEmbeddings({
-    modelName,
+    model,
   });
 
 let vectorStoreFactory = async (options: VectorStoreOptions): Promise<LanceDB> => {
@@ -115,9 +115,9 @@ export const __test__ = {
     vectorStoreFactory = factory;
   },
   resetFactories(): void {
-    embeddingsFactory = (modelName) =>
+    embeddingsFactory = (model) =>
       new HuggingFaceTransformersEmbeddings({
-        modelName,
+        model,
       });
     vectorStoreFactory = async (options: VectorStoreOptions): Promise<LanceDB> => {
       const connection = (await connect(options.dbPath)) as any;

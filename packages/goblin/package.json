@@ -17,6 +17,7 @@
     "turndown": "^7.2.0"
   },
   "devDependencies": {
+    "@grogbot/goblin": "link:",
     "@types/node": "^20.11.30",
     "@types/turndown": "^5.0.6",
     "typescript": "^5.9.3"

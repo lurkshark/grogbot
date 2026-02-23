@@ -3,7 +3,6 @@ import path from "node:path";
 import { HuggingFaceTransformersEmbeddings } from "@langchain/community/embeddings/huggingface_transformers";
 import { LanceDB } from "@langchain/community/vectorstores/lancedb";
 import { Document } from "@langchain/core/documents";
-import { connect } from "@lancedb/lancedb";
 
 export type IngestOptions = {
   inputDir: string;
@@ -93,17 +92,10 @@ let embeddingsFactory: EmbeddingsFactory = (model) =>
   });
 
 let vectorStoreFactory = async (options: VectorStoreOptions): Promise<LanceDB> => {
-  const connection = (await connect(options.dbPath)) as any;
-  let table: any;
-
-  try {
-    table = await connection.openTable(options.tableName);
-  } catch {
-    table = await connection.createTable(options.tableName, []);
-  }
-
   return new LanceDB(options.embeddings, {
-    table,
+    uri: options.dbPath,
+    tableName: options.tableName,
+    mode: "overwrite",
   });
 };
 
@@ -120,17 +112,10 @@ export const __test__ = {
         model,
       });
     vectorStoreFactory = async (options: VectorStoreOptions): Promise<LanceDB> => {
-      const connection = (await connect(options.dbPath)) as any;
-      let table: any;
-
-      try {
-        table = await connection.openTable(options.tableName);
-      } catch {
-        table = await connection.createTable(options.tableName, []);
-      }
-
       return new LanceDB(options.embeddings, {
-        table,
+        uri: options.dbPath,
+        tableName: options.tableName,
+        mode: "overwrite",
       });
     };
   },

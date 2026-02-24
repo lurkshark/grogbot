@@ -5,5 +5,4 @@ dist/
 tmp/
 coverage/
 .env
-test/.tmp-*
 output/

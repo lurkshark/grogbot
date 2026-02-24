@@ -4,14 +4,14 @@ import { Search } from '@upstash/search';
 import { readMarkdownFile } from '../utils/frontmatter.js';
 import { chunkMarkdown } from '../utils/chunking.js';
 
-type StoreOptions = {
+type LoadOptions = {
   maxChunkSize?: number;
 };
 
-export async function runStore(
+export async function runLoad(
   pond: string,
   namespace?: string,
-  options: StoreOptions = {},
+  options: LoadOptions = {},
 ): Promise<void> {
   const resolvedNamespace = namespace ?? 'ingest';
   const sourceDir = path.join(pond, resolvedNamespace === 'ingest' ? 'ingest' : resolvedNamespace);
@@ -72,6 +72,6 @@ export async function runStore(
   await index.upsert(documents);
 
   console.log(
-    `Stored ${documents.length} chunk(s) from ${files.length} file(s) into ${resolvedNamespace}.`,
+    `Loaded ${documents.length} chunk(s) from ${files.length} file(s) into ${resolvedNamespace}.`,
   );
 }

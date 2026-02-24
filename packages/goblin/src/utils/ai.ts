@@ -11,7 +11,7 @@ function getProvider(): ReturnType<typeof createOpenRouter> {
   }
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    throw new Error('OPENROUTER_API_KEY is required to run extract.');
+    throw new Error('OPENROUTER_API_KEY is required to run transform.');
   }
   openrouterProvider = createOpenRouter({ apiKey });
   return openrouterProvider;

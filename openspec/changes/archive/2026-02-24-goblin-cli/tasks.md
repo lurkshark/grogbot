@@ -12,25 +12,25 @@
 - [x] 2.3 Implement RSS item normalization and HTML-to-markdown conversion helpers
 - [x] 2.4 Implement markdown chunking utility with heading-aware boundaries and overlap
 
-## 3. Ingest command
+## 3. Extract command
 
 - [x] 3.1 Implement RSS feed parsing and item filtering (skip missing title/date)
-- [x] 3.2 Write ingest markdown files with frontmatter into `pond/ingest/`
+- [x] 3.2 Write extract markdown files with frontmatter into `pond/ingest/`
 - [x] 3.3 Add end-of-run summary for skipped items
 
-## 4. Extract command
+## 4. Transform command
 
 - [x] 4.1 Configure Vercel AI SDK Global Provider with OpenRouter and default model
-- [x] 4.2 Implement concurrency-limited extract processing over ingest files
-- [x] 4.3 Write extract markdown outputs with metadata and `<namespace>-extract-info.yaml`
+- [x] 4.2 Implement concurrency-limited transform processing over extract files
+- [x] 4.3 Write transform markdown outputs with metadata and `<namespace>-extract-info.yaml`
 
-## 5. Store command
+## 5. Load command
 
-- [x] 5.1 Implement namespace resolution and markdown loading for store inputs
+- [x] 5.1 Implement namespace resolution and markdown loading for load inputs
 - [x] 5.2 Chunk markdown content (excluding frontmatter) and attach chunk metadata
 - [x] 5.3 Push chunks to Upstash Search using standard environment variables
 
 ## 6. CLI wiring and docs
 
-- [x] 6.1 Wire CLI commands/arguments and help text for ingest/extract/store
+- [x] 6.1 Wire CLI commands/arguments and help text for extract/transform/load
 - [x] 6.2 Add basic usage notes to package README

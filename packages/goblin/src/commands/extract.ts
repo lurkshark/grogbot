@@ -1,70 +1,66 @@
-import { mkdir, readdir, writeFile } from 'fs/promises';
+import { mkdir } from 'fs/promises';
 import path from 'path';
-import pLimit from 'p-limit';
-import YAML from 'yaml';
-import { readMarkdownFile, writeMarkdownFile } from '../utils/frontmatter.js';
-import { hashSlug } from '../utils/slug.js';
-import { DEFAULT_MODEL, runPrompt } from '../utils/ai.js';
+import { parseFeed, parseItemDate, normalizeItem } from '../utils/rss.js';
+import { buildSlug, hashSlug } from '../utils/slug.js';
+import { writeMarkdownFile } from '../utils/frontmatter.js';
 
-type ExtractOptions = {
-  model?: string;
+type SkippedItem = {
+  title: string;
+  reason: string;
 };
 
-export async function runExtract(
-  pond: string,
-  namespace: string,
-  prompt: string,
-  options: ExtractOptions = {},
-): Promise<void> {
+export async function runExtract(pond: string, feedUrl: string): Promise<void> {
+  const feed = await parseFeed(feedUrl);
   const ingestDir = path.join(pond, 'ingest');
-  const outputDir = path.join(pond, namespace);
-  await mkdir(outputDir, { recursive: true });
+  await mkdir(ingestDir, { recursive: true });
 
-  const entries = await readdir(ingestDir, { withFileTypes: true });
-  const files = entries.filter((entry) => entry.isFile() && entry.name.endsWith('.md'));
+  const skipped: SkippedItem[] = [];
+  let extractedCount = 0;
 
-  const model = options.model ?? DEFAULT_MODEL;
-  const limit = pLimit(8);
+  for (const item of feed.items ?? []) {
+    const title = item.title?.trim();
+    if (!title) {
+      skipped.push({ title: '(untitled)', reason: 'missing title' });
+      continue;
+    }
 
-  const tasks = files.map((entry) =>
-    limit(async () => {
-      const filePath = path.join(ingestDir, entry.name);
-      const { data, content } = await readMarkdownFile(filePath);
-      const sourceSlug = data.slug as string | undefined;
-      const sourceGuid = data.guid as string | undefined;
-      if (!sourceSlug || !sourceGuid) {
-        throw new Error(`Missing slug or guid in ${filePath}`);
-      }
-      const extractSlug = `${sourceSlug}--${namespace}`;
-      const extractGuid = hashSlug(extractSlug);
+    const date = parseItemDate(item);
+    if (!date) {
+      skipped.push({ title, reason: 'missing publish date' });
+      continue;
+    }
 
-      const composedPrompt = `${prompt}\n\n${content}`;
-      const generated = await runPrompt(composedPrompt, model);
+    const url = item.link ?? item.guid ?? '';
 
-      const outputPath = path.join(outputDir, `${extractSlug}.md`);
+    try {
+      const { content } = await normalizeItem(item);
+      const slug = buildSlug(date, title);
+      const guid = hashSlug(slug);
+      const outputPath = path.join(ingestDir, `${slug}.md`);
+
       await writeMarkdownFile(
         outputPath,
         {
-          guid: extractGuid,
-          slug: extractSlug,
-          source_guid: sourceGuid,
-          source_slug: sourceSlug,
+          guid,
+          slug,
+          title,
+          date: date.toISOString(),
+          url,
         },
-        generated,
+        content,
       );
-    }),
-  );
+      extractedCount += 1;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'unknown error';
+      skipped.push({ title, reason });
+    }
+  }
 
-  await Promise.all(tasks);
-
-  const infoPath = path.join(pond, `${namespace}-extract-info.yaml`);
-  const info = {
-    namespace,
-    model,
-    prompt,
-    generated_at: new Date().toISOString(),
-  };
-  await writeFile(infoPath, YAML.stringify(info), 'utf8');
-
-  console.log(`Extracted ${files.length} item(s) into ${outputDir}.`);
+  console.log(`Extracted ${extractedCount} item(s) into ${ingestDir}.`);
+  if (skipped.length > 0) {
+    console.log('Skipped items:');
+    for (const item of skipped) {
+      console.log(`- ${item.title}: ${item.reason}`);
+    }
+  }
 }

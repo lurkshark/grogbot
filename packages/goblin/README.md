@@ -1,53 +1,21 @@
 # @grogbot/goblin
 
-CLI tool to scrape an RSS feed and export posts as markdown files with YAML frontmatter.
+CLI tooling for the Grogbot RSS → extract → store pipeline.
 
 ## Usage
 
-```
-goblin scrape <feed-url> [--out <dir>] [--overwrite] [--max-posts <n>]
-```
+```bash
+pnpm --filter @grogbot/goblin build
 
-### Options
+goblin ingest <pond> <feed-url>
 
-- `--out`, `-o`: Output directory (defaults to current working directory).
-- `--overwrite`: Overwrite existing files (default: skip existing).
-- `--max-posts`, `-m`: Maximum number of posts to scrape (default: 100).
+goblin extract <pond> <namespace> <prompt> [--model <model>]
 
-## Output format
-
-Each RSS item becomes a markdown file with YAML frontmatter:
-
-```
----
-title: Post title
-date: 2026-02-21T12:34:56.000Z
-link: https://example.com/post
-guid: https://example.com/post
-author: Author Name
-categories:
-  - Category A
-  - Category B
-source: https://example.com/feed.xml
----
-
-<post body>
+goblin store <pond> [namespace] [--max-chunk-size <size>]
 ```
 
-### Frontmatter fields
+### Environment variables
 
-- `title`: Title of the post.
-- `date`: ISO 8601 timestamp (publication date or fallback).
-- `link`: Canonical link to the post.
-- `guid`: GUID or fallback identifier.
-- `author`: Optional author value from the feed.
-- `categories`: Optional category list.
-- `source`: Feed URL.
-
-## Testing
-
-Offline integration tests use repository-local RSS fixtures and do not require network access.
-
-```
-pnpm --filter @grogbot/goblin test
-```
+- `OPENROUTER_API_KEY` (required for `extract`)
+- `UPSTASH_SEARCH_REST_URL` (required for `store`)
+- `UPSTASH_SEARCH_REST_TOKEN` (required for `store`)

@@ -59,7 +59,10 @@ function splitLargeBlock(block: string, maxChunkSize: number): string[] {
       continue;
     }
     const separator = current && current !== headingLine ? '\n\n' : current ? '\n\n' : '';
-    if ((current + separator + segment).length > maxChunkSize && current !== (hasHeading ? headingLine : '')) {
+    if (
+      (current + separator + segment).length > maxChunkSize &&
+      current !== (hasHeading ? headingLine : '')
+    ) {
       flush();
     }
     current = current ? `${current}${separator}${segment}` : segment;

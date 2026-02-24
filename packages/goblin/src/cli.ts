@@ -47,14 +47,16 @@ program
   .argument('<pond>', 'Path to pond directory')
   .argument('[namespace]', 'Namespace for extract outputs (defaults to ingest)')
   .option('--max-chunk-size <size>', 'Maximum chunk size', (value) => Number(value), 1500)
-  .action(async (pond: string, namespace: string | undefined, options: { maxChunkSize: number }) => {
-    try {
-      await runStore(pond, namespace, { maxChunkSize: options.maxChunkSize });
-    } catch (error) {
-      console.error(error instanceof Error ? error.message : error);
-      process.exitCode = 1;
-    }
-  });
+  .action(
+    async (pond: string, namespace: string | undefined, options: { maxChunkSize: number }) => {
+      try {
+        await runStore(pond, namespace, { maxChunkSize: options.maxChunkSize });
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : error);
+        process.exitCode = 1;
+      }
+    },
+  );
 
 program.parseAsync(process.argv).catch((error) => {
   console.error(error instanceof Error ? error.message : error);

@@ -42,7 +42,8 @@ export async function runStore(
   for (const entry of files) {
     const filePath = path.join(sourceDir, entry.name);
     const { data, content } = await readMarkdownFile(filePath);
-    const sourceGuid = (data.source_guid as string | undefined) ?? (data.guid as string | undefined);
+    const sourceGuid =
+      (data.source_guid as string | undefined) ?? (data.guid as string | undefined);
     if (!sourceGuid) {
       throw new Error(`Missing guid in ${filePath}`);
     }

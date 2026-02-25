@@ -5,9 +5,12 @@
   "packageManager": "pnpm@9.0.0",
   "scripts": {
     "format": "prettier --write \"**/*.ts\"",
-    "format:check": "prettier --check \"**/*.ts\""
+    "format:check": "prettier --check \"**/*.ts\"",
+    "exec:env": "dotenv -e .env -- pnpm --filter \"${PNPM_FILTER}\" exec",
+    "exec:env:goblin": "PNPM_FILTER=@grogbot/goblin pnpm exec:env goblin"
   },
   "devDependencies": {
+    "dotenv-cli": "^7.3.0",
     "prettier": "^3.2.0",
     "typescript": "^5.4.0"
   }

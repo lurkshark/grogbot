@@ -9,12 +9,15 @@ type LoadOptions = {
 };
 
 export async function runLoad(
-  pond: string,
+  stagingDirectory: string,
   namespace?: string,
   options: LoadOptions = {},
 ): Promise<void> {
   const resolvedNamespace = namespace ?? 'ingest';
-  const sourceDir = path.join(pond, resolvedNamespace === 'ingest' ? 'ingest' : resolvedNamespace);
+  const sourceDir = path.join(
+    stagingDirectory,
+    resolvedNamespace === 'ingest' ? 'ingest' : resolvedNamespace,
+  );
 
   const entries = await readdir(sourceDir, { withFileTypes: true });
   const files = entries.filter((entry) => entry.isFile() && entry.name.endsWith('.md'));

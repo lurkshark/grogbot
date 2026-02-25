@@ -21,7 +21,12 @@ export type NormalizedItem = {
 };
 
 export async function parseFeed(feedUrl: string): Promise<Parser.Output<RssItem>> {
-  return parser.parseURL(feedUrl);
+  const response = await fetch(new URL(feedUrl));
+  if (!response.ok) {
+    throw new Error(`Failed to fetch RSS feed ${feedUrl}: ${response.status}`);
+  }
+  const xml = await response.text();
+  return parser.parseString(xml);
 }
 
 export function parseItemDate(item: RssItem): Date | null {

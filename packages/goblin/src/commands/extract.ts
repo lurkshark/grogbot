@@ -9,9 +9,12 @@ type SkippedItem = {
   reason: string;
 };
 
-export async function runExtract(pond: string, feedUrl: string): Promise<void> {
+export async function runExtract(
+  stagingDirectory: string,
+  feedUrl: string,
+): Promise<void> {
   const feed = await parseFeed(feedUrl);
-  const ingestDir = path.join(pond, 'ingest');
+  const ingestDir = path.join(stagingDirectory, 'ingest');
   await mkdir(ingestDir, { recursive: true });
 
   const skipped: SkippedItem[] = [];

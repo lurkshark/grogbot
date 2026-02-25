@@ -11,13 +11,13 @@ type TransformOptions = {
 };
 
 export async function runTransform(
-  pond: string,
+  stagingDirectory: string,
   namespace: string,
   prompt: string,
   options: TransformOptions = {},
 ): Promise<void> {
-  const ingestDir = path.join(pond, 'ingest');
-  const outputDir = path.join(pond, namespace);
+  const ingestDir = path.join(stagingDirectory, 'ingest');
+  const outputDir = path.join(stagingDirectory, namespace);
   await mkdir(outputDir, { recursive: true });
 
   const entries = await readdir(ingestDir, { withFileTypes: true });
@@ -57,7 +57,7 @@ export async function runTransform(
 
   await Promise.all(tasks);
 
-  const infoPath = path.join(pond, `${namespace}-extract-info.yaml`);
+  const infoPath = path.join(stagingDirectory, `${namespace}-extract-info.yaml`);
   const info = {
     namespace,
     model,

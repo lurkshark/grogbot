@@ -15,7 +15,7 @@
 ## 3. Extract command
 
 - [x] 3.1 Implement RSS feed parsing and item filtering (skip missing title/date)
-- [x] 3.2 Write extract markdown files with frontmatter into `pond/ingest/`
+- [x] 3.2 Write extract markdown files with frontmatter into `staging-directory/ingest/`
 - [x] 3.3 Add end-of-run summary for skipped items
 
 ## 4. Transform command

@@ -7,11 +7,11 @@ CLI tooling for the Grogbot RSS → extract → transform → load pipeline.
 ```bash
 pnpm --filter @grogbot/goblin build
 
-goblin extract <pond> <feed-url>
+goblin extract <staging-directory> <feed-url>
 
-goblin transform <pond> <namespace> <prompt> [--model <model>]
+goblin transform <staging-directory> <namespace> <prompt> [--model <model>]
 
-goblin load <pond> [namespace] [--max-chunk-size <size>]
+goblin load <staging-directory> [namespace] [--max-chunk-size <size>]
 ```
 
 ### Environment variables

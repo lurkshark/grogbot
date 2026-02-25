@@ -15,7 +15,7 @@ program
   .command('extract')
   .description('Extract an RSS feed into staging-directory/ingest.')
   .argument('<staging-directory>', 'Path to staging directory')
-  .argument('<feedUrl>', 'RSS feed URL')
+  .argument('<feed-url>', 'RSS feed URL')
   .action(async (stagingDirectory: string, feedUrl: string) => {
     try {
       await runExtract(stagingDirectory, feedUrl);

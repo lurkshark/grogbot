@@ -14,8 +14,8 @@ export async function runExtract(
   feedUrl: string,
 ): Promise<void> {
   const feed = await parseFeed(feedUrl);
-  const ingestDir = path.join(stagingDirectory, 'ingest');
-  await mkdir(ingestDir, { recursive: true });
+  const extractDir = path.join(stagingDirectory, 'extract');
+  await mkdir(extractDir, { recursive: true });
 
   const skipped: SkippedItem[] = [];
   let extractedCount = 0;
@@ -39,7 +39,7 @@ export async function runExtract(
       const { content } = await normalizeItem(item);
       const slug = buildSlug(date, title);
       const guid = hashSlug(slug);
-      const outputPath = path.join(ingestDir, `${slug}.md`);
+      const outputPath = path.join(extractDir, `${slug}.md`);
 
       await writeMarkdownFile(
         outputPath,
@@ -59,7 +59,7 @@ export async function runExtract(
     }
   }
 
-  console.log(`Extracted ${extractedCount} item(s) into ${ingestDir}.`);
+  console.log(`Extracted ${extractedCount} item(s) into ${extractDir}.`);
   if (skipped.length > 0) {
     console.log('Skipped items:');
     for (const item of skipped) {

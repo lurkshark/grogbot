@@ -16,11 +16,11 @@ export async function runTransform(
   prompt: string,
   options: TransformOptions = {},
 ): Promise<void> {
-  const ingestDir = path.join(stagingDirectory, 'ingest');
+  const extractDir = path.join(stagingDirectory, 'extract');
   const outputDir = path.join(stagingDirectory, namespace);
   await mkdir(outputDir, { recursive: true });
 
-  const entries = await readdir(ingestDir, { withFileTypes: true });
+  const entries = await readdir(extractDir, { withFileTypes: true });
   const files = entries.filter((entry) => entry.isFile() && entry.name.endsWith('.md'));
 
   const model = options.model ?? DEFAULT_MODEL;
@@ -28,7 +28,7 @@ export async function runTransform(
 
   const tasks = files.map((entry) =>
     limit(async () => {
-      const filePath = path.join(ingestDir, entry.name);
+      const filePath = path.join(extractDir, entry.name);
       const { data, content } = await readMarkdownFile(filePath);
       const sourceSlug = data.slug as string | undefined;
       const sourceGuid = data.guid as string | undefined;
@@ -57,7 +57,7 @@ export async function runTransform(
 
   await Promise.all(tasks);
 
-  const infoPath = path.join(stagingDirectory, `${namespace}-extract-info.yaml`);
+  const infoPath = path.join(stagingDirectory, `${namespace}-transform-info.yaml`);
   const info = {
     namespace,
     model,

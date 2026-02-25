@@ -13,10 +13,10 @@ export async function runLoad(
   namespace?: string,
   options: LoadOptions = {},
 ): Promise<void> {
-  const resolvedNamespace = namespace ?? 'ingest';
+  const resolvedNamespace = namespace ?? 'extract';
   const sourceDir = path.join(
     stagingDirectory,
-    resolvedNamespace === 'ingest' ? 'ingest' : resolvedNamespace,
+    resolvedNamespace,
   );
 
   const entries = await readdir(sourceDir, { withFileTypes: true });

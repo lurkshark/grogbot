@@ -9,7 +9,7 @@ We are introducing a new CLI package to handle a multi-stage pipeline: extract R
 - Implement a stable staging directory layout and metadata conventions for extract and transform outputs.
 - Use RSS content directly when available and fall back to HTML readability + markdown conversion.
 - Run LLM transformation via OpenRouter with controlled concurrency.
-- Chunk markdown content with heading-aware boundaries and ~10% overlap, then load into Upstash Search.
+- Chunk markdown content with heading-aware boundaries and ~5% overlap, then load into Upstash Search.
 - Establish formatting (Prettier) and TypeScript config inheritance from `tsconfig.base.json`.
 
 **Non-Goals:**
@@ -31,10 +31,10 @@ We are introducing a new CLI package to handle a multi-stage pipeline: extract R
 - **LLM transform via OpenRouter**: Use Vercel AI SDK Global Provider with the OpenRouter provider. Default model is Gemini 3 Flash when not provided on the CLI. Use a concurrency limit of 8 (e.g., `p-limit`) and overwrite existing transform files. Store prompt/model metadata in `staging-directory/<namespace>-extract-info.yaml` (YAML) rather than frontmatter.
   - **Alternatives considered**: Per-call provider configuration (more boilerplate), storing prompt/model in frontmatter (noisy, repeats per file).
 
-- **Chunking strategy for load**: Parse markdown to preserve heading boundaries. Treat headings + following content as blocks, build chunks up to a max size (default 1500 chars). If a block is larger than max, split by paragraph. Add ~10% overlap by prefixing the next chunk with the trailing portion of the previous chunk, while ensuring headings are repeated at boundaries when a section spans chunks.
+- **Chunking strategy for load**: Parse markdown to preserve heading boundaries. Treat headings + following content as blocks, build chunks up to a max size (default 2048 chars). If a block is larger than max, split by paragraph. Add ~5% overlap by prefixing the next chunk with the trailing portion of the previous chunk, while ensuring headings are repeated at boundaries when a section spans chunks.
   - **Alternatives considered**: Simple character slicing (breaks structure), no overlap (hurts semantic continuity).
 
-- **Search loading**: Use Upstash Search with standard environment variables (`UPSTASH_SEARCH_REST_URL`, `UPSTASH_SEARCH_REST_TOKEN`). Index name is the namespace or `ingest` when omitted. Store chunk content plus metadata fields `chunk_index` and `source_guid`.
+- **Search loading**: Use Upstash Search with standard environment variables (`UPSTASH_SEARCH_REST_URL`, `UPSTASH_SEARCH_REST_TOKEN`). Index name is the namespace or `ingest` when omitted. Store chunk content plus metadata fields `chunkIndex` and `sourceGuid`.
   - **Alternatives considered**: Separate metadata store (adds complexity), storing the entire frontmatter as part of the chunk content (pollutes embeddings).
 
 ## Risks / Trade-offs

@@ -29,7 +29,7 @@ export async function runLoad(
   }
 
   const search = new Search({ url, token });
-  const maxChunkSize = options.maxChunkSize ?? 1500;
+  const maxChunkSize = options.maxChunkSize ?? 2048;
 
   const documents: Array<{
     id: string;
@@ -37,30 +37,31 @@ export async function runLoad(
       text: string;
     };
     metadata: {
-      chunk_index: number;
-      source_guid: string;
+      chunkIndex: number;
+      sourceGuid: string;
     };
   }> = [];
 
   for (const entry of files) {
     const filePath = path.join(sourceDir, entry.name);
     const { data, content } = await readMarkdownFile(filePath);
+    const slug = path.parse(entry.name).name;
     const sourceGuid =
-      (data.source_guid as string | undefined) ?? (data.guid as string | undefined);
+      (data.sourceGuid as string | undefined) ?? (data.guid as string | undefined);
     if (!sourceGuid) {
       throw new Error(`Missing guid in ${filePath}`);
     }
 
-    const chunks = chunkMarkdown(content, { maxChunkSize, overlapRatio: 0.1 });
+    const chunks = chunkMarkdown(content, { maxChunkSize, overlapRatio: 0.05 });
     chunks.forEach((chunk, index) => {
       documents.push({
-        id: `${sourceGuid}-${index}`,
+        id: `${slug}-${index}`,
         content: {
           text: chunk,
         },
         metadata: {
-          chunk_index: index,
-          source_guid: sourceGuid,
+          chunkIndex: index,
+          sourceGuid: sourceGuid,
         },
       });
     });
@@ -72,7 +73,10 @@ export async function runLoad(
   }
 
   const index = search.index(resolvedNamespace);
-  await index.upsert(documents);
+  for (let start = 0; start < documents.length; start += 100) {
+    const batch = documents.slice(start, start + 100);
+    await index.upsert(batch);
+  }
 
   console.log(
     `Loaded ${documents.length} chunk(s) from ${files.length} file(s) into ${resolvedNamespace}.`,

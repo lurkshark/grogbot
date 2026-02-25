@@ -36,14 +36,14 @@ The `transform` subcommand SHALL read all markdown files in `staging-directory/i
 - **THEN** the CLI writes a markdown transform for each ingest file into `staging-directory/<namespace>/` using OpenRouter with max concurrency 8
 
 ### Requirement: Transform metadata, slug, GUID, and extract info
-Each transform markdown file SHALL include YAML frontmatter with `guid`, `slug`, `source_guid`, and `source_slug`. The transform slug SHALL be the extract slug plus the namespace (joined as `extractSlug--namespace`), and the GUID SHALL be a SHA-256 hash of the transform slug. The CLI SHALL also write `staging-directory/<namespace>-extract-info.yaml` containing the prompt and model metadata for the run.
+Each transform markdown file SHALL include YAML frontmatter with `guid`, `slug`, `sourceGuid`, and `source_slug`. The transform slug SHALL be the extract slug plus the namespace (joined as `extractSlug--namespace`), and the GUID SHALL be a SHA-256 hash of the transform slug. The CLI SHALL also write `staging-directory/<namespace>-extract-info.yaml` containing the prompt and model metadata for the run.
 
 #### Scenario: Transform writes metadata and info file
 - **WHEN** transform outputs are generated for a namespace
 - **THEN** each output includes frontmatter with transform and source identifiers and the staging directory root contains `<namespace>-extract-info.yaml`
 
 ### Requirement: Load chunks and writes to Upstash Search
-The `load` subcommand SHALL read markdown files from `staging-directory/<namespace>/` (or `staging-directory/ingest/` when namespace is omitted), exclude frontmatter from content, and chunk the markdown into sections of maximum size (default 1500 characters) with ~10% overlap while retaining headings at chunk boundaries. Each chunk SHALL be written to the Upstash Search index named by the namespace (or `ingest`) with metadata fields `chunk_index` and `source_guid`.
+The `load` subcommand SHALL read markdown files from `staging-directory/<namespace>/` (or `staging-directory/ingest/` when namespace is omitted), exclude frontmatter from content, and chunk the markdown into sections of maximum size (default 2048 characters) with ~5% overlap while retaining headings at chunk boundaries. Each chunk SHALL be written to the Upstash Search index named by the namespace (or `ingest`) with metadata fields `chunkIndex` and `sourceGuid`.
 
 #### Scenario: Load indexes chunked content
 - **WHEN** the user runs `goblin load <staging-directory>` with default options

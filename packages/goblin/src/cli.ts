@@ -53,7 +53,7 @@ program
   .description('Chunk markdown and load into Upstash Search.')
   .argument('<staging-directory>', 'Path to staging directory')
   .argument('[namespace]', 'Namespace for transform outputs (defaults to RSS extract output)')
-  .option('--max-chunk-size <size>', 'Maximum chunk size', (value) => Number(value), 1500)
+  .option('--max-chunk-size <size>', 'Maximum chunk size', (value) => Number(value), 2048)
   .action(
     async (
       stagingDirectory: string,

@@ -47,7 +47,7 @@ export async function runTransform(
         {
           guid: transformGuid,
           slug: transformSlug,
-          source_guid: sourceGuid,
+          sourceGuid: sourceGuid,
           source_slug: sourceSlug,
         },
         generated,

@@ -31,6 +31,32 @@ function splitIntoBlocks(markdown: string): string[] {
   return blocks;
 }
 
+function splitByLength(text: string, maxSize: number): string[] {
+  const parts: string[] = [];
+  let remaining = text.trim();
+
+  while (remaining.length > maxSize) {
+    const slice = remaining.slice(0, maxSize + 1);
+    const lastWhitespace = Math.max(
+      slice.lastIndexOf(' '),
+      slice.lastIndexOf('\n'),
+      slice.lastIndexOf('\t'),
+    );
+    const splitIndex = lastWhitespace > 0 ? lastWhitespace : maxSize;
+    const part = remaining.slice(0, splitIndex).trim();
+    if (part) {
+      parts.push(part);
+    }
+    remaining = remaining.slice(splitIndex).trim();
+  }
+
+  if (remaining) {
+    parts.push(remaining);
+  }
+
+  return parts;
+}
+
 function splitLargeBlock(block: string, maxChunkSize: number): string[] {
   if (block.length <= maxChunkSize) {
     return [block.trim()];
@@ -41,6 +67,9 @@ function splitLargeBlock(block: string, maxChunkSize: number): string[] {
   const hasHeading = /^#{1,6}\s+/.test(headingLine);
   const body = hasHeading ? lines.slice(1).join('\n').trim() : block.trim();
   const paragraphs = body.split(/\n{2,}/);
+  const maxSegmentSize = hasHeading
+    ? Math.max(maxChunkSize - headingLine.length - 2, 1)
+    : maxChunkSize;
 
   const chunks: string[] = [];
   let current = hasHeading ? headingLine : '';
@@ -58,14 +87,20 @@ function splitLargeBlock(block: string, maxChunkSize: number): string[] {
     if (!segment) {
       continue;
     }
-    const separator = current && current !== headingLine ? '\n\n' : current ? '\n\n' : '';
-    if (
-      (current + separator + segment).length > maxChunkSize &&
-      current !== (hasHeading ? headingLine : '')
-    ) {
-      flush();
+    const segments =
+      segment.length > maxSegmentSize ? splitByLength(segment, maxSegmentSize) : [segment];
+
+    for (const part of segments) {
+      let separator = current ? '\n\n' : '';
+      if (
+        (current + separator + part).length > maxChunkSize &&
+        current !== (hasHeading ? headingLine : '')
+      ) {
+        flush();
+        separator = current ? '\n\n' : '';
+      }
+      current = current ? `${current}${separator}${part}` : part;
     }
-    current = current ? `${current}${separator}${segment}` : segment;
   }
 
   flush();
@@ -89,8 +124,8 @@ function applyOverlap(chunks: string[], overlapRatio: number): string[] {
 }
 
 export function chunkMarkdown(markdown: string, options: ChunkOptions = {}): string[] {
-  const maxChunkSize = options.maxChunkSize ?? 1500;
-  const overlapRatio = options.overlapRatio ?? 0.1;
+  const maxChunkSize = options.maxChunkSize ?? 2048;
+  const overlapRatio = options.overlapRatio ?? 0.05;
 
   const blocks = splitIntoBlocks(markdown);
   const normalizedBlocks = blocks.flatMap((block) => splitLargeBlock(block, maxChunkSize));

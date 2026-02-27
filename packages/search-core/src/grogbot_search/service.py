@@ -62,10 +62,6 @@ def _extract_meta_content(html: str, name: str, attr: str = "name") -> Optional[
     return tag.get("content") if tag else None
 
 
-def _extract_author(html: str) -> Optional[str]:
-    return _extract_meta_content(html, "author")
-
-
 def _extract_published_at(html: str) -> Optional[datetime]:
     for attr, value in [("property", "article:published_time"), ("name", "pubdate")]:
         meta = _extract_meta_content(html, value, attr=attr)
@@ -121,7 +117,6 @@ class SearchService:
                 source_id TEXT NOT NULL,
                 canonical_url TEXT NOT NULL UNIQUE,
                 title TEXT,
-                author TEXT,
                 published_at TEXT,
                 content_markdown TEXT NOT NULL,
                 FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
@@ -219,7 +214,6 @@ class SearchService:
         source_id: str,
         canonical_url: str,
         title: Optional[str],
-        author: Optional[str],
         published_at: Optional[datetime],
         content_markdown: str,
     ) -> Document:
@@ -235,13 +229,12 @@ class SearchService:
             self.connection.execute(
                 """
                 UPDATE documents
-                SET source_id = ?, title = ?, author = ?, published_at = ?, content_markdown = ?
+                SET source_id = ?, title = ?, published_at = ?, content_markdown = ?
                 WHERE id = ?
                 """,
                 (
                     source_id,
                     title,
-                    author,
                     _serialize_datetime(published_at),
                     content_markdown,
                     document_id,
@@ -251,15 +244,14 @@ class SearchService:
             document_id = document_id_for_url(canonical_url)
             self.connection.execute(
                 """
-                INSERT INTO documents (id, source_id, canonical_url, title, author, published_at, content_markdown)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO documents (id, source_id, canonical_url, title, published_at, content_markdown)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     document_id,
                     source_id,
                     canonical_url,
                     title,
-                    author,
                     _serialize_datetime(published_at),
                     content_markdown,
                 ),
@@ -273,7 +265,6 @@ class SearchService:
             source_id=source_id,
             canonical_url=canonical_url,
             title=title,
-            author=author,
             published_at=published_at,
             content_markdown=content_markdown,
         )
@@ -281,7 +272,7 @@ class SearchService:
     def get_document(self, document_id: str) -> Optional[Document]:
         row = self.connection.execute(
             """
-            SELECT id, source_id, canonical_url, title, author, published_at, content_markdown
+            SELECT id, source_id, canonical_url, title, published_at, content_markdown
             FROM documents WHERE id = ?
             """,
             (document_id,),
@@ -296,7 +287,7 @@ class SearchService:
         if source_id:
             rows = self.connection.execute(
                 """
-                SELECT id, source_id, canonical_url, title, author, published_at, content_markdown
+                SELECT id, source_id, canonical_url, title, published_at, content_markdown
                 FROM documents WHERE source_id = ? ORDER BY canonical_url
                 """,
                 (source_id,),
@@ -304,7 +295,7 @@ class SearchService:
         else:
             rows = self.connection.execute(
                 """
-                SELECT id, source_id, canonical_url, title, author, published_at, content_markdown
+                SELECT id, source_id, canonical_url, title, published_at, content_markdown
                 FROM documents ORDER BY canonical_url
                 """
             ).fetchall()
@@ -353,13 +344,11 @@ class SearchService:
         content_html = readable.summary()
         content_markdown = html_to_markdown(content_html)
         title = readable.short_title() or None
-        author = _extract_author(html)
         published_at = _extract_published_at(html)
         return self.upsert_document(
             source_id=source.id,
             canonical_url=canonical_url,
             title=title,
-            author=author,
             published_at=published_at,
             content_markdown=content_markdown,
         )
@@ -388,14 +377,12 @@ class SearchService:
             content = content or entry.get("summary") or ""
             content_markdown = html_to_markdown(content)
             title = entry.get("title")
-            author = entry.get("author")
             published_at = _parse_datetime(entry.get("published") or entry.get("updated"))
             documents.append(
                 self.upsert_document(
                     source_id=source.id,
                     canonical_url=canonical_url,
                     title=title,
-                    author=author,
                     published_at=published_at,
                     content_markdown=content_markdown,
                 )
@@ -468,7 +455,6 @@ class SearchService:
                 documents.source_id,
                 documents.canonical_url,
                 documents.title,
-                documents.author,
                 documents.published_at,
                 documents.content_markdown
             FROM chunks
@@ -492,7 +478,6 @@ class SearchService:
                 source_id=data["source_id"],
                 canonical_url=data["canonical_url"],
                 title=data["title"],
-                author=data["author"],
                 published_at=_parse_datetime(data["published_at"]),
                 content_markdown=data["content_markdown"],
             )

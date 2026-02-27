@@ -74,7 +74,6 @@ def document_upsert(
     canonical_url: str = typer.Option(..., "--canonical-url"),
     content_markdown: str = typer.Option(..., "--content-markdown"),
     title: Optional[str] = typer.Option(None, "--title"),
-    author: Optional[str] = typer.Option(None, "--author"),
     published_at: Optional[str] = typer.Option(None, "--published-at"),
 ):
     with _service() as service:
@@ -82,7 +81,6 @@ def document_upsert(
             source_id=source_id,
             canonical_url=canonical_url,
             title=title,
-            author=author,
             published_at=_parse_datetime(published_at),
             content_markdown=content_markdown,
         )

@@ -54,7 +54,6 @@ def http_server():
       <head>
         <title>Test Article</title>
         <link rel=\"canonical\" href=\"{base_url}/canonical\" />
-        <meta name=\"author\" content=\"Jane Doe\" />
       </head>
       <body>
         <article>

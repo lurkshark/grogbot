@@ -17,7 +17,6 @@ def test_source_upsert_and_cascade_delete(service: SearchService):
         source_id=source.id,
         canonical_url="https://example.com/hello",
         title="Hello",
-        author=None,
         published_at=None,
         content_markdown="Hello world",
     )
@@ -34,7 +33,6 @@ def test_document_upsert_regenerates_chunks(service: SearchService):
         source_id=source.id,
         canonical_url="https://example.com/hello",
         title="Hello",
-        author=None,
         published_at=None,
         content_markdown="Hello world",
     )
@@ -44,7 +42,6 @@ def test_document_upsert_regenerates_chunks(service: SearchService):
         source_id=source.id,
         canonical_url="https://example.com/hello",
         title="Hello again",
-        author=None,
         published_at=None,
         content_markdown="Hello world updated content",
     )
@@ -59,7 +56,6 @@ def test_hybrid_search_returns_results(service: SearchService):
         source_id=source.id,
         canonical_url="https://example.com/hello",
         title="Hello",
-        author=None,
         published_at=None,
         content_markdown="Hello world from the search system.",
     )

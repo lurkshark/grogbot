@@ -22,7 +22,6 @@ class DocumentUpsertRequest(BaseModel):
     canonical_url: str
     content_markdown: str
     title: Optional[str] = None
-    author: Optional[str] = None
     published_at: Optional[datetime] = None
 
 
@@ -81,7 +80,6 @@ def upsert_document(payload: DocumentUpsertRequest, service: SearchService = Dep
         source_id=payload.source_id,
         canonical_url=payload.canonical_url,
         title=payload.title,
-        author=payload.author,
         published_at=payload.published_at,
         content_markdown=payload.content_markdown,
     )

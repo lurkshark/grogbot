@@ -18,7 +18,6 @@ class Document(BaseModel):
     source_id: str
     canonical_url: str
     title: Optional[str] = None
-    author: Optional[str] = None
     published_at: Optional[datetime] = None
     content_markdown: str
 

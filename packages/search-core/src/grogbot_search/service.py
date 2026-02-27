@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import re
 import pysqlite3 as sqlite3
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +35,25 @@ def _normalize_domain(url: str) -> str:
 
 def _canonicalize_url(url: str) -> str:
     return url.strip()
+
+
+def _extract_feed_urls_from_opml(xml_content: str) -> List[str]:
+    """Parse OPML XML and extract all xmlUrl values from nested outline elements."""
+    try:
+        root = ET.fromstring(xml_content)
+    except ET.ParseError as exc:
+        raise ValueError(f"Invalid OPML XML: {exc}") from exc
+
+    urls: List[str] = []
+
+    def _extract_outlines(element):
+        for outline in element.findall(".//outline"):
+            xml_url = outline.get("xmlUrl")
+            if xml_url:
+                urls.append(xml_url.strip())
+
+    _extract_outlines(root)
+    return urls
 
 
 def _parse_datetime(value: Optional[str]) -> Optional[datetime]:
@@ -388,6 +408,34 @@ class SearchService:
                 )
             )
         return documents
+
+    def create_documents_from_opml(self, opml_url: str) -> List[Document]:
+        """Fetch and parse OPML, then ingest documents from each feed URL with best-effort handling."""
+        response = httpx.get(opml_url, timeout=20.0)
+        response.raise_for_status()
+        xml_content = response.text
+
+        feed_urls = _extract_feed_urls_from_opml(xml_content)
+
+        # Deduplicate URLs while preserving order
+        seen: set[str] = set()
+        unique_urls: List[str] = []
+        for url in feed_urls:
+            normalized = _canonicalize_url(url)
+            if normalized not in seen:
+                seen.add(normalized)
+                unique_urls.append(normalized)
+
+        all_documents: List[Document] = []
+        for feed_url in unique_urls:
+            try:
+                docs = self.create_documents_from_feed(feed_url)
+                all_documents.extend(docs)
+            except Exception:
+                # Best-effort: continue processing remaining feeds on failure
+                continue
+
+        return all_documents
 
     def search(self, query: str, limit: int = 10) -> List[SearchResult]:
         query = query.strip()

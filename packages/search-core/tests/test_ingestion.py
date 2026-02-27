@@ -27,3 +27,30 @@ def test_create_documents_from_feed(service: SearchService, http_server):
     source = service.get_source(document.source_id)
     assert source is not None
     assert source.rss_feed == f"{http_server}/feed"
+
+
+def test_create_documents_from_opml_multi_feed(service: SearchService, http_server):
+    documents = service.create_documents_from_opml(f"{http_server}/opml")
+
+    assert len(documents) == 2
+    urls = {doc.canonical_url for doc in documents}
+    assert f"{http_server}/feed-entry" in urls
+    assert f"{http_server}/feed2-entry" in urls
+
+
+def test_create_documents_from_opml_nested_outlines(service: SearchService, http_server):
+    documents = service.create_documents_from_opml(f"{http_server}/opml-nested")
+
+    # Should find feeds from nested outlines (2 valid, 1 invalid skipped)
+    assert len(documents) == 2
+    urls = {doc.canonical_url for doc in documents}
+    assert f"{http_server}/feed-entry" in urls
+    assert f"{http_server}/feed2-entry" in urls
+
+
+def test_create_documents_from_opml_deduplicates_feeds(service: SearchService, http_server):
+    documents = service.create_documents_from_opml(f"{http_server}/opml-duplicates")
+
+    # Should deduplicate and only process one feed
+    assert len(documents) == 1
+    assert documents[0].canonical_url == f"{http_server}/feed-entry"

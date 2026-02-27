@@ -33,6 +33,10 @@ class IngestFeedRequest(BaseModel):
     feed_url: str
 
 
+class IngestOpmlRequest(BaseModel):
+    opml_url: str
+
+
 def get_service():
     config = load_config()
     service = SearchService(config.db_path)
@@ -106,6 +110,11 @@ def ingest_url(payload: IngestUrlRequest, service: SearchService = Depends(get_s
 @app.post("/search/ingest/feed")
 def ingest_feed(payload: IngestFeedRequest, service: SearchService = Depends(get_service)):
     return service.create_documents_from_feed(payload.feed_url)
+
+
+@app.post("/search/ingest/opml")
+def ingest_opml(payload: IngestOpmlRequest, service: SearchService = Depends(get_service)):
+    return service.create_documents_from_opml(payload.opml_url)
 
 
 @app.get("/search/query")

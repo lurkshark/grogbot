@@ -124,6 +124,13 @@ def ingest_feed(feed_url: str = typer.Argument(..., help="Feed URL to ingest")):
     typer.echo(_dump([doc.model_dump() for doc in documents]))
 
 
+@search_app.command("ingest-opml")
+def ingest_opml(opml_url: str = typer.Argument(..., help="OPML URL to ingest")):
+    with _service() as service:
+        documents = service.create_documents_from_opml(opml_url)
+    typer.echo(_dump([doc.model_dump() for doc in documents]))
+
+
 @search_app.command("query")
 def query(text: str = typer.Argument(..., help="Search query"), limit: int = typer.Option(10, "--limit")):
     with _service() as service:

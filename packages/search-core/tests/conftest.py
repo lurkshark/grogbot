@@ -35,6 +35,8 @@ def http_server():
             self.send_response(200)
             if self.path.endswith(".xml") or "rss" in self.path:
                 self.send_header("Content-Type", "application/rss+xml")
+            elif "opml" in self.path:
+                self.send_header("Content-Type", "text/x-opml+xml")
             else:
                 self.send_header("Content-Type", "text/html")
             self.end_headers()
@@ -77,6 +79,64 @@ def http_server():
         </item>
       </channel>
     </rss>
+    """
+
+    responses["/feed2"] = f"""
+    <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+      <channel>
+        <title>Test Feed 2</title>
+        <item>
+          <title>Second Feed Entry</title>
+          <link>{base_url}/feed2-entry</link>
+          <guid>{base_url}/feed2-entry</guid>
+          <content:encoded><![CDATA[<p>Second feed body content.</p>]]></content:encoded>
+          <pubDate>Thu, 02 Jan 2025 12:00:00 GMT</pubDate>
+        </item>
+      </channel>
+    </rss>
+    """
+
+    responses["/invalid-feed"] = "NOT VALID XML"
+
+    responses["/opml"] = f"""<?xml version="1.0" encoding="UTF-8"?>
+    <opml version="2.0">
+      <head>
+        <title>Test Subscriptions</title>
+      </head>
+      <body>
+        <outline text="Test Feed" type="rss" xmlUrl="{base_url}/feed" />
+        <outline text="Test Feed 2" type="rss" xmlUrl="{base_url}/feed2" />
+      </body>
+    </opml>
+    """
+
+    responses["/opml-nested"] = f"""<?xml version="1.0" encoding="UTF-8"?>
+    <opml version="2.0">
+      <head>
+        <title>Nested Subscriptions</title>
+      </head>
+      <body>
+        <outline text="Category 1">
+          <outline text="Test Feed" type="rss" xmlUrl="{base_url}/feed" />
+          <outline text="Invalid" type="rss" xmlUrl="{base_url}/invalid-feed" />
+        </outline>
+        <outline text="Category 2">
+          <outline text="Test Feed 2" type="rss" xmlUrl="{base_url}/feed2" />
+        </outline>
+      </body>
+    </opml>
+    """
+
+    responses["/opml-duplicates"] = f"""<?xml version="1.0" encoding="UTF-8"?>
+    <opml version="2.0">
+      <head>
+        <title>Duplicate Subscriptions</title>
+      </head>
+      <body>
+        <outline text="Test Feed" type="rss" xmlUrl="{base_url}/feed" />
+        <outline text="Same Feed Again" type="rss" xmlUrl="{base_url}/feed" />
+      </body>
+    </opml>
     """
 
     try:

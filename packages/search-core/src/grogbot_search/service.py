@@ -76,22 +76,6 @@ def _extract_published_at(html: str) -> Optional[datetime]:
     return None
 
 
-def _normalize_text(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    value = html.unescape(value)
-    if "\\" not in value:
-        return value
-
-    def replace(match: re.Match[str]) -> str:
-        return chr(int(match.group(1), 16))
-
-    value = re.sub(r"\\u([0-9a-fA-F]{4})", replace, value)
-    value = re.sub(r"\\U([0-9a-fA-F]{8})", replace, value)
-    value = re.sub(r"\\x([0-9a-fA-F]{2})", replace, value)
-    return value
-
-
 def _ensure_sqlite_vec(connection: sqlite3.Connection):
     connection.enable_load_extension(True)
     try:
@@ -367,9 +351,9 @@ class SearchService:
             source = self.upsert_source(canonical_domain=canonical_domain, name=None, rss_feed=None)
         readable = ReadabilityDocument(html)
         content_html = readable.summary()
-        content_markdown = _normalize_text(html_to_markdown(content_html))
-        title = _normalize_text(readable.short_title() or None)
-        author = _normalize_text(_extract_author(html))
+        content_markdown = html_to_markdown(content_html)
+        title = readable.short_title() or None
+        author = _extract_author(html)
         published_at = _extract_published_at(html)
         return self.upsert_document(
             source_id=source.id,
@@ -402,9 +386,9 @@ class SearchService:
             if entry.get("content"):
                 content = entry.content[0].value
             content = content or entry.get("summary") or ""
-            content_markdown = _normalize_text(html_to_markdown(content))
-            title = _normalize_text(entry.get("title"))
-            author = _normalize_text(entry.get("author"))
+            content_markdown = html_to_markdown(content)
+            title = entry.get("title")
+            author = entry.get("author")
             published_at = _parse_datetime(entry.get("published") or entry.get("updated"))
             documents.append(
                 self.upsert_document(

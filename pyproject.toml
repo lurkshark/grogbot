@@ -1,0 +1,11 @@
+[tool.uv.workspace]
+members = [
+  "packages/search-core",
+  "packages/cli",
+  "packages/api",
+]
+
+[tool.uv.sources]
+"grogbot-search-core" = { workspace = true }
+"grogbot-cli" = { workspace = true }
+"grogbot-api" = { workspace = true }

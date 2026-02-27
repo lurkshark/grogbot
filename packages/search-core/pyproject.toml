@@ -1,0 +1,32 @@
+[project]
+name = "grogbot-search-core"
+version = "0.1.0"
+description = "Grogbot search core library"
+requires-python = ">=3.11"
+dependencies = [
+  "beautifulsoup4>=4.12",
+  "feedparser>=6.0",
+  "httpx>=0.27",
+  "markdown>=3.6",
+  "markdownify>=0.12",
+  "pydantic>=2.6",
+  "einops>=0.7",
+  "python-dateutil>=2.9",
+  "python-slugify>=8.0",
+  "pysqlite3>=0.5.2",
+  "readability-lxml>=0.8",
+  "sentence-transformers>=3.0",
+  "sqlite-vec>=0.1",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0",
+]
+
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/grogbot_search"]

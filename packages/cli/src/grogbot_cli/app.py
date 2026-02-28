@@ -44,7 +44,7 @@ def _bootstrap_sources_path() -> Path:
     return Path(__file__).resolve().parents[4] / "sources.toml"
 
 
-def _load_bootstrap_sources(path: Path) -> list[dict[str, str]]:
+def _load_bootstrap_sources(path: Path) -> list[dict[str, Optional[str]]]:
     if not path.exists():
         raise ValueError(f"sources.toml not found at {path}")
 
@@ -55,17 +55,11 @@ def _load_bootstrap_sources(path: Path) -> list[dict[str, str]]:
     if not isinstance(entries, list):
         raise ValueError("sources.toml must define [[source]] entries")
 
-    sources: list[dict[str, str]] = []
+    sources: list[dict[str, Optional[str]]] = []
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
             raise ValueError(f"source entry #{index + 1} must be a table")
-        sitemap = entry.get("sitemap")
-        feed = entry.get("feed")
-        if not isinstance(sitemap, str) or not sitemap.strip():
-            raise ValueError(f"source entry #{index + 1} must include a non-empty sitemap")
-        if not isinstance(feed, str) or not feed.strip():
-            raise ValueError(f"source entry #{index + 1} must include a non-empty feed")
-        sources.append({"sitemap": sitemap.strip(), "feed": feed.strip()})
+        sources.append({"sitemap": entry.get("sitemap"), "feed": entry.get("feed")})
 
     return sources
 
@@ -182,14 +176,13 @@ def bootstrap():
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
-    all_documents = []
     with _service() as service:
         for source in sources:
-            all_documents.extend(service.create_documents_from_sitemap(source["sitemap"]))
+            if "sitemap" in source and source["sitemap"]:
+                service.create_documents_from_sitemap(source["sitemap"])
         for source in sources:
-            all_documents.extend(service.create_documents_from_feed(source["feed"]))
-
-    typer.echo(_dump([doc.model_dump() for doc in all_documents]))
+            if "feed" in source and source["feed"]:
+                service.create_documents_from_feed(source["feed"])
 
 
 @search_app.command("query")

@@ -6,8 +6,8 @@ from typing import Iterable, List
 from bs4 import BeautifulSoup
 import markdown as markdown_lib
 
-TARGET_WORDS = 2048
-MAX_WORDS = 8192
+TARGET_WORDS = int(2048 * 0.75)
+MAX_WORDS = int(8192 * 0.65)
 
 
 def markdown_to_text(markdown: str) -> str:

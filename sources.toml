@@ -87,7 +87,7 @@ sitemap = "http://grognardia.blogspot.com/sitemap.xml"
 feed = "http://www.blogger.com/feeds/7487871339000666216/posts/default"
 
 [[source]]
-feed = https://www.hauntedspice.com/feed.xml"
+feed = "https://www.hauntedspice.com/feed.xml"
 
 [[source]]
 sitemap = "http://hillcantons.blogspot.com/sitemap.xml"

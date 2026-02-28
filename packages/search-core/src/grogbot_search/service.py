@@ -441,57 +441,84 @@ class SearchService:
         query = query.strip()
         if not query:
             return []
-        fts_rows = self.connection.execute(
-            """
-            SELECT chunks.id AS chunk_id, bm25(chunks_fts) AS rank
-            FROM chunks_fts
-            JOIN chunks ON chunks_fts.rowid = chunks.id
-            WHERE chunks_fts MATCH ?
-            ORDER BY rank
-            LIMIT ?
-            """,
-            (query, limit * 5),
-        ).fetchall()
-        raw_fts_scores = {row["chunk_id"]: -row["rank"] for row in fts_rows}
-        if raw_fts_scores:
-            min_score = min(raw_fts_scores.values())
-            max_score = max(raw_fts_scores.values())
-            if max_score == min_score:
-                fts_scores = {chunk_id: 1.0 for chunk_id in raw_fts_scores}
-            else:
-                range_score = max_score - min_score
-                fts_scores = {
-                    chunk_id: (score - min_score) / range_score
-                    for chunk_id, score in raw_fts_scores.items()
-                }
-        else:
-            fts_scores = {}
+        if limit <= 0:
+            return []
 
+        candidate_limit = limit * 10
         query_embedding = embed_texts([query], prompt="search_query")[0]
-        vec_rows = self.connection.execute(
+        scored_rows = self.connection.execute(
             """
-            SELECT rowid AS chunk_id, distance
-            FROM chunks_vec
-            WHERE embedding MATCH ?
-            ORDER BY distance
+            WITH
+            fts_top AS (
+                SELECT
+                    chunks.id AS chunk_id,
+                    bm25(chunks_fts) AS rank
+                FROM chunks_fts
+                JOIN chunks ON chunks_fts.rowid = chunks.id
+                WHERE chunks_fts MATCH ?
+                ORDER BY rank ASC, chunks.id ASC
+                LIMIT ?
+            ),
+            fts_ranked AS (
+                SELECT
+                    chunk_id,
+                    1.0 / (1 + row_number() OVER (ORDER BY rank ASC, chunk_id ASC)) AS fts_score
+                FROM fts_top
+            ),
+            vec_top AS (
+                SELECT
+                    rowid AS chunk_id,
+                    distance
+                FROM chunks_vec
+                WHERE embedding MATCH ?
+                ORDER BY distance ASC
+                LIMIT ?
+            ),
+            vec_ranked AS (
+                SELECT
+                    chunk_id,
+                    1.0 / (1 + row_number() OVER (ORDER BY distance ASC, chunk_id ASC)) AS vector_score
+                FROM vec_top
+            ),
+            all_chunk_ids AS (
+                SELECT chunk_id FROM fts_ranked
+                UNION
+                SELECT chunk_id FROM vec_ranked
+            )
+            SELECT
+                all_chunk_ids.chunk_id,
+                COALESCE(fts_ranked.fts_score, 0.0) AS fts_score,
+                COALESCE(vec_ranked.vector_score, 0.0) AS vector_score,
+                COALESCE(fts_ranked.fts_score, 0.0) + COALESCE(vec_ranked.vector_score, 0.0) AS final_score
+            FROM all_chunk_ids
+            LEFT JOIN fts_ranked ON fts_ranked.chunk_id = all_chunk_ids.chunk_id
+            LEFT JOIN vec_ranked ON vec_ranked.chunk_id = all_chunk_ids.chunk_id
+            ORDER BY final_score DESC, all_chunk_ids.chunk_id ASC
             LIMIT ?
             """,
-            (self._sqlite_vec.serialize_float32(query_embedding), limit * 5),
+            (
+                query,
+                candidate_limit,
+                self._sqlite_vec.serialize_float32(query_embedding),
+                candidate_limit,
+                limit,
+            ),
         ).fetchall()
-        vector_scores = {row["chunk_id"]: 1 / (1 + row["distance"]) for row in vec_rows}
-
-        chunk_ids = set(fts_scores) | set(vector_scores)
-        if not chunk_ids:
+        if not scored_rows:
             return []
 
         scores: dict[int, SearchScores] = {}
-        for chunk_id in chunk_ids:
-            fts_score = fts_scores.get(chunk_id, 0.0)
-            vector_score = vector_scores.get(chunk_id, 0.0)
-            hybrid = (0.7 * fts_score) + (0.3 * vector_score)
-            scores[chunk_id] = SearchScores(fts=fts_score, vector=vector_score, hybrid=hybrid)
+        ranked_chunk_ids: List[int] = []
+        for row in scored_rows:
+            chunk_id = row["chunk_id"]
+            ranked_chunk_ids.append(chunk_id)
+            scores[chunk_id] = SearchScores(
+                fts=row["fts_score"],
+                vector=row["vector_score"],
+                hybrid=row["final_score"],
+            )
 
-        placeholders = ",".join(["?"] * len(chunk_ids))
+        placeholders = ",".join(["?"] * len(ranked_chunk_ids))
         rows = self.connection.execute(
             f"""
             SELECT
@@ -509,11 +536,15 @@ class SearchService:
             JOIN documents ON documents.id = chunks.document_id
             WHERE chunks.id IN ({placeholders})
             """,
-            tuple(chunk_ids),
+            tuple(ranked_chunk_ids),
         ).fetchall()
 
+        rows_by_chunk_id = {row["chunk_id"]: row for row in rows}
         results: List[SearchResult] = []
-        for row in rows:
+        for chunk_id in ranked_chunk_ids:
+            row = rows_by_chunk_id.get(chunk_id)
+            if row is None:
+                continue
             data = dict(row)
             chunk = Chunk(
                 id=data["chunk_id"],
@@ -529,7 +560,7 @@ class SearchService:
                 published_at=_parse_datetime(data["published_at"]),
                 content_markdown=data["content_markdown"],
             )
-            score = scores[chunk.id]
+            score = scores[chunk_id]
             results.append(
                 SearchResult(
                     chunk=chunk,
@@ -540,5 +571,4 @@ class SearchService:
                 )
             )
 
-        results.sort(key=lambda item: item.score, reverse=True)
-        return results[:limit]
+        return results

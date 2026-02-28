@@ -32,6 +32,6 @@ class Chunk(BaseModel):
 class SearchResult(BaseModel):
     chunk: Chunk
     document: Document
-    score: float = Field(..., description="Hybrid score combining FTS and vector similarity")
+    score: float = Field(..., description="Final rank-fusion score combining FTS and vector rankings")
     fts_score: float
     vector_score: float

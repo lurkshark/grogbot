@@ -130,3 +130,78 @@ def test_opml_request_model_validation(api_client):
 
     response = api_client.post("/search/ingest/opml", json={"opml_url": None})
     assert response.status_code == 422
+
+
+def test_api_ingest_sitemap_endpoint_exists(api_client):
+    """Test that API endpoint exists and accepts sitemap_url parameter"""
+    with patch.object(SearchService, "create_documents_from_sitemap", return_value=[]) as mock_sitemap:
+        response = api_client.post(
+            "/search/ingest/sitemap",
+            json={"sitemap_url": "http://example.com/sitemap.xml"},
+        )
+
+    assert response.status_code == 200
+    mock_sitemap.assert_called_once_with("http://example.com/sitemap.xml")
+
+
+def test_api_ingest_sitemap_returns_documents(api_client, service: SearchService):
+    """Test that API endpoint returns documents from create_documents_from_sitemap"""
+    source = service.upsert_source("example.com", name="Test")
+    doc1 = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/doc1",
+        title="Doc 1",
+        published_at=None,
+        content_markdown="Content 1",
+    )
+    doc2 = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/doc2",
+        title="Doc 2",
+        published_at=None,
+        content_markdown="Content 2",
+    )
+
+    with patch.object(SearchService, "create_documents_from_sitemap", return_value=[doc1, doc2]):
+        response = api_client.post(
+            "/search/ingest/sitemap",
+            json={"sitemap_url": "http://example.com/sitemap.xml"},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    assert data[0]["title"] == "Doc 1"
+    assert data[1]["title"] == "Doc 2"
+
+
+def test_cli_ingest_sitemap_command(service: SearchService, http_server):
+    """Test that CLI command delegates to service.create_documents_from_sitemap"""
+    from typer.testing import CliRunner
+    from grogbot_cli.app import app as cli_app
+    from grogbot_search import load_config
+
+    runner = CliRunner()
+
+    config = load_config()
+    config.db_path = service.db_path
+
+    with patch("grogbot_cli.app.load_config", return_value=config):
+        result = runner.invoke(cli_app, ["search", "ingest-sitemap", f"{http_server}/sitemap.xml"])
+
+    assert result.exit_code == 0
+    import json
+    data = json.loads(result.output)
+    assert len(data) == 2
+    urls = {doc["canonical_url"] for doc in data}
+    assert f"{http_server}/canonical" in urls
+    assert f"{http_server}/canonical-2" in urls
+
+
+def test_sitemap_request_model_validation(api_client):
+    """Test that API validates the sitemap_url parameter is provided"""
+    response = api_client.post("/search/ingest/sitemap", json={})
+    assert response.status_code == 422
+
+    response = api_client.post("/search/ingest/sitemap", json={"sitemap_url": None})
+    assert response.status_code == 422

@@ -187,7 +187,7 @@ class SearchService:
             );
 
             CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts
-            USING fts5(content_text, content='chunks', content_rowid='id');
+            USING fts5(content_text, content='chunks', content_rowid='id', tokenize='porter');
 
             CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
                 INSERT INTO chunks_fts(rowid, content_text)

@@ -37,6 +37,10 @@ class IngestOpmlRequest(BaseModel):
     opml_url: str
 
 
+class IngestSitemapRequest(BaseModel):
+    sitemap_url: str
+
+
 def get_service():
     config = load_config()
     service = SearchService(config.db_path)
@@ -115,6 +119,11 @@ def ingest_feed(payload: IngestFeedRequest, service: SearchService = Depends(get
 @app.post("/search/ingest/opml")
 def ingest_opml(payload: IngestOpmlRequest, service: SearchService = Depends(get_service)):
     return service.create_documents_from_opml(payload.opml_url)
+
+
+@app.post("/search/ingest/sitemap")
+def ingest_sitemap(payload: IngestSitemapRequest, service: SearchService = Depends(get_service)):
+    return service.create_documents_from_sitemap(payload.sitemap_url)
 
 
 @app.get("/search/query")

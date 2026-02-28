@@ -93,6 +93,25 @@ def test_rank_fusion_scores_are_reciprocal_and_additive(service: SearchService):
         assert result.score == pytest.approx(result.fts_score + result.vector_score)
 
 
+def test_rank_fusion_zero_fills_missing_method_score(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/vector-only",
+        title="Vector Only",
+        published_at=None,
+        content_markdown="alpha alpha",
+    )
+
+    results = service.search("nonexistentterm", limit=5)
+
+    assert results
+    top = results[0]
+    assert top.fts_score == 0.0
+    assert top.vector_score > 0.0
+    assert top.score == pytest.approx(top.fts_score + top.vector_score)
+
+
 class _RecordingConnection:
     def __init__(self, connection):
         self._connection = connection

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-from grogbot_search.service import SearchService
+import pytest
+
+from grogbot_search.service import BackoffError, SearchService
 
 
 def test_create_document_from_url(service: SearchService, http_server):
@@ -14,6 +16,21 @@ def test_create_document_from_url(service: SearchService, http_server):
     source = service.get_source(document.source_id)
     assert source is not None
     assert source.canonical_domain == urlparse(document.canonical_url).netloc
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "backoff-403",
+        "backoff-429",
+        "backoff-503",
+        "backoff-retry-after",
+        "backoff-captcha",
+    ],
+)
+def test_create_document_from_url_raises_on_backoff_signals(service: SearchService, http_server, path: str):
+    with pytest.raises(BackoffError):
+        service.create_document_from_url(f"{http_server}/{path}")
 
 
 def test_create_documents_from_feed(service: SearchService, http_server):
@@ -87,3 +104,30 @@ def test_create_documents_from_sitemap_deduplicates_urls(service: SearchService,
 
     assert len(documents) == 1
     assert documents[0].canonical_url == f"{http_server}/canonical"
+
+
+@pytest.mark.parametrize(
+    "sitemap_path",
+    [
+        "sitemap-backoff-429.xml",
+        "sitemap-backoff-503.xml",
+        "sitemap-backoff-retry-after.xml",
+        "sitemap-backoff-captcha.xml",
+    ],
+)
+def test_create_documents_from_sitemap_raises_on_backoff_signals(
+    service: SearchService,
+    http_server,
+    sitemap_path: str,
+):
+    with pytest.raises(BackoffError):
+        service.create_documents_from_sitemap(f"{http_server}/{sitemap_path}")
+
+
+def test_create_documents_from_sitemap_halts_on_backoff_and_keeps_prior_documents(service: SearchService, http_server):
+    with pytest.raises(BackoffError):
+        service.create_documents_from_sitemap(f"{http_server}/sitemap-backoff-403.xml")
+
+    stored_documents = service.list_documents()
+    assert len(stored_documents) == 1
+    assert stored_documents[0].canonical_url == f"{http_server}/canonical"

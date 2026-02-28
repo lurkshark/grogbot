@@ -29,6 +29,34 @@ class SearchScores:
     hybrid: float
 
 
+_BACKOFF_STATUS_CODES = {401, 403, 429, 503}
+_CAPTCHA_MARKERS = (
+    "captcha",
+    "cf-chl",
+    "attention required",
+    "verify you are human",
+)
+
+
+class BackoffError(RuntimeError):
+    """Raised when URL ingestion encounters a backoff or anti-bot signal."""
+
+
+def _classify_backoff_response(response: httpx.Response) -> Optional[str]:
+    if response.status_code in _BACKOFF_STATUS_CODES:
+        return f"status_code={response.status_code}"
+
+    if response.headers.get("Retry-After") is not None:
+        return "retry-after-header"
+
+    body = response.text.lower()
+    for marker in _CAPTCHA_MARKERS:
+        if marker in body:
+            return f"body-marker={marker}"
+
+    return None
+
+
 def _normalize_domain(url: str) -> str:
     return urlparse(url).netloc.lower()
 
@@ -386,10 +414,7 @@ class SearchService:
             )
         return created
 
-    def create_document_from_url(self, url: str) -> Document:
-        response = httpx.get(url, timeout=20.0)
-        response.raise_for_status()
-        html = response.text
+    def _create_document_from_html(self, url: str, html: str) -> Document:
         canonical_url = _extract_canonical_url(html, url)
         canonical_domain = _normalize_domain(canonical_url)
         source = self._get_source_by_domain(canonical_domain)
@@ -407,6 +432,14 @@ class SearchService:
             published_at=published_at,
             content_markdown=content_markdown,
         )
+
+    def create_document_from_url(self, url: str) -> Document:
+        response = httpx.get(url, timeout=20.0)
+        backoff_reason = _classify_backoff_response(response)
+        if backoff_reason:
+            raise BackoffError(f"Backoff detected while ingesting URL {url}: {backoff_reason}")
+        response.raise_for_status()
+        return self._create_document_from_html(url, response.text)
 
     def create_documents_from_feed(self, feed_url: str) -> List[Document]:
         import feedparser
@@ -487,6 +520,9 @@ class SearchService:
         for page_url in unique_urls:
             try:
                 documents.append(self.create_document_from_url(page_url))
+            except BackoffError:
+                # Fail-fast for explicit backoff/anti-bot signals
+                raise
             except Exception:
                 # Best-effort: continue processing remaining URLs on failure
                 continue

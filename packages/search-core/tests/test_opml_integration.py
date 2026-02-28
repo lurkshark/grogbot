@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from grogbot_search.service import SearchService
+from grogbot_search.service import BackoffError, SearchService
 
 
 @pytest.fixture
@@ -196,6 +196,56 @@ def test_cli_ingest_sitemap_command(service: SearchService, http_server):
     urls = {doc["canonical_url"] for doc in data}
     assert f"{http_server}/canonical" in urls
     assert f"{http_server}/canonical-2" in urls
+
+
+def test_cli_ingest_sitemap_surfaces_backoff_failure(service: SearchService, http_server):
+    from typer.testing import CliRunner
+    from grogbot_cli.app import app as cli_app
+    from grogbot_search import load_config
+
+    runner = CliRunner()
+
+    config = load_config()
+    config.db_path = service.db_path
+
+    with patch("grogbot_cli.app.load_config", return_value=config):
+        result = runner.invoke(cli_app, ["search", "ingest-sitemap", f"{http_server}/sitemap-backoff-403.xml"])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, BackoffError)
+
+
+def test_api_ingest_sitemap_surfaces_backoff_failure(api_client, http_server):
+    with pytest.raises(BackoffError):
+        api_client.post(
+            "/search/ingest/sitemap",
+            json={"sitemap_url": f"{http_server}/sitemap-backoff-403.xml"},
+        )
+
+
+def test_cli_ingest_url_surfaces_backoff_failure(service: SearchService, http_server):
+    from typer.testing import CliRunner
+    from grogbot_cli.app import app as cli_app
+    from grogbot_search import load_config
+
+    runner = CliRunner()
+
+    config = load_config()
+    config.db_path = service.db_path
+
+    with patch("grogbot_cli.app.load_config", return_value=config):
+        result = runner.invoke(cli_app, ["search", "ingest-url", f"{http_server}/backoff-403"])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, BackoffError)
+
+
+def test_api_ingest_url_surfaces_backoff_failure(api_client, http_server):
+    with pytest.raises(BackoffError):
+        api_client.post(
+            "/search/ingest/url",
+            json={"url": f"{http_server}/backoff-403"},
+        )
 
 
 def test_sitemap_request_model_validation(api_client):

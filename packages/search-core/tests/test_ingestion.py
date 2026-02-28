@@ -54,3 +54,20 @@ def test_create_documents_from_opml_deduplicates_feeds(service: SearchService, h
     # Should deduplicate and only process one feed
     assert len(documents) == 1
     assert documents[0].canonical_url == f"{http_server}/feed-entry"
+
+
+def test_create_documents_from_sitemap_ingests_all_url_entries(service: SearchService, http_server):
+    documents = service.create_documents_from_sitemap(f"{http_server}/sitemap.xml")
+
+    # Should ingest valid URLs and skip failures best-effort
+    assert len(documents) == 2
+    urls = {doc.canonical_url for doc in documents}
+    assert f"{http_server}/canonical" in urls
+    assert f"{http_server}/canonical-2" in urls
+
+
+def test_create_documents_from_sitemap_deduplicates_urls(service: SearchService, http_server):
+    documents = service.create_documents_from_sitemap(f"{http_server}/sitemap-duplicates.xml")
+
+    assert len(documents) == 1
+    assert documents[0].canonical_url == f"{http_server}/canonical"

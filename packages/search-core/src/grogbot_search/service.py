@@ -56,6 +56,41 @@ def _extract_feed_urls_from_opml(xml_content: str) -> List[str]:
     return urls
 
 
+def _local_tag_name(tag: str) -> str:
+    """Return XML tag name without namespace."""
+    return tag.split("}", 1)[-1] if "}" in tag else tag
+
+
+def _extract_urls_from_sitemap(xml_content: str) -> List[str]:
+    """Parse sitemap XML and extract all <url><loc> values."""
+    try:
+        root = ET.fromstring(xml_content)
+    except ET.ParseError as exc:
+        raise ValueError(f"Invalid sitemap XML: {exc}") from exc
+
+    urls: List[str] = []
+    for element in root.iter():
+        if _local_tag_name(element.tag) != "url":
+            continue
+        for child in element:
+            if _local_tag_name(child.tag) == "loc" and child.text:
+                urls.append(child.text.strip())
+                break
+    return urls
+
+
+def _dedupe_urls(urls: Iterable[str]) -> List[str]:
+    """Deduplicate URLs while preserving order."""
+    seen: set[str] = set()
+    unique_urls: List[str] = []
+    for url in urls:
+        normalized = _canonicalize_url(url)
+        if normalized not in seen:
+            seen.add(normalized)
+            unique_urls.append(normalized)
+    return unique_urls
+
+
 def _parse_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
@@ -416,15 +451,7 @@ class SearchService:
         xml_content = response.text
 
         feed_urls = _extract_feed_urls_from_opml(xml_content)
-
-        # Deduplicate URLs while preserving order
-        seen: set[str] = set()
-        unique_urls: List[str] = []
-        for url in feed_urls:
-            normalized = _canonicalize_url(url)
-            if normalized not in seen:
-                seen.add(normalized)
-                unique_urls.append(normalized)
+        unique_urls = _dedupe_urls(feed_urls)
 
         all_documents: List[Document] = []
         for feed_url in unique_urls:
@@ -436,6 +463,25 @@ class SearchService:
                 continue
 
         return all_documents
+
+    def create_documents_from_sitemap(self, sitemap_url: str) -> List[Document]:
+        """Fetch and parse sitemap XML, then ingest each URL entry with best-effort handling."""
+        response = httpx.get(sitemap_url, timeout=20.0)
+        response.raise_for_status()
+        xml_content = response.text
+
+        page_urls = _extract_urls_from_sitemap(xml_content)
+        unique_urls = _dedupe_urls(page_urls)
+
+        documents: List[Document] = []
+        for page_url in unique_urls:
+            try:
+                documents.append(self.create_document_from_url(page_url))
+            except Exception:
+                # Best-effort: continue processing remaining URLs on failure
+                continue
+
+        return documents
 
     def search(self, query: str, limit: int = 10) -> List[SearchResult]:
         query = query.strip()

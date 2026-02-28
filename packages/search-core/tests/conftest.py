@@ -33,10 +33,10 @@ def http_server():
                 self.end_headers()
                 return
             self.send_response(200)
-            if self.path.endswith(".xml") or "rss" in self.path:
-                self.send_header("Content-Type", "application/rss+xml")
-            elif "opml" in self.path:
+            if "opml" in self.path:
                 self.send_header("Content-Type", "text/x-opml+xml")
+            elif "sitemap" in self.path or self.path.endswith(".xml") or "rss" in self.path:
+                self.send_header("Content-Type", "application/xml")
             else:
                 self.send_header("Content-Type", "text/html")
             self.end_headers()
@@ -61,6 +61,21 @@ def http_server():
         <article>
           <h1>Article Heading</h1>
           <p>Hello world from article content.</p>
+        </article>
+      </body>
+    </html>
+    """
+
+    responses["/article-2"] = f"""
+    <html>
+      <head>
+        <title>Second Test Article</title>
+        <link rel="canonical" href="{base_url}/canonical-2" />
+      </head>
+      <body>
+        <article>
+          <h1>Second Article Heading</h1>
+          <p>Hello world from second article content.</p>
         </article>
       </body>
     </html>
@@ -137,6 +152,27 @@ def http_server():
         <outline text="Same Feed Again" type="rss" xmlUrl="{base_url}/feed" />
       </body>
     </opml>
+    """
+
+    responses["/sitemap.xml"] = f"""<?xml version="1.0" encoding="UTF-8"?>
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url>
+        <loc>{base_url}/article</loc>
+      </url>
+      <url>
+        <loc>{base_url}/article-2</loc>
+      </url>
+      <url>
+        <loc>{base_url}/missing</loc>
+      </url>
+    </urlset>
+    """
+
+    responses["/sitemap-duplicates.xml"] = f"""<?xml version="1.0" encoding="UTF-8"?>
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url><loc>{base_url}/article</loc></url>
+      <url><loc>{base_url}/article</loc></url>
+    </urlset>
     """
 
     try:

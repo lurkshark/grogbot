@@ -205,3 +205,63 @@ def test_sitemap_request_model_validation(api_client):
 
     response = api_client.post("/search/ingest/sitemap", json={"sitemap_url": None})
     assert response.status_code == 422
+
+
+def test_cli_query_includes_full_content_by_default(service: SearchService):
+    """Default query output should include chunk.content_text and document.content_markdown."""
+    from typer.testing import CliRunner
+    from grogbot_cli.app import app as cli_app
+    from grogbot_search import load_config
+    import json
+
+    source = service.upsert_source("example.com", name="Example")
+    service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/full",
+        title="Full",
+        published_at=None,
+        content_markdown="hello world full content",
+    )
+
+    runner = CliRunner()
+    config = load_config()
+    config.db_path = service.db_path
+
+    with patch("grogbot_cli.app.load_config", return_value=config):
+        result = runner.invoke(cli_app, ["search", "query", "hello", "--limit", "1"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert len(data) == 1
+    assert "content_markdown" in data[0]["document"]
+    assert "content_text" in data[0]["chunk"]
+
+
+def test_cli_query_summary_omits_large_content_fields(service: SearchService):
+    """Summary query output should omit chunk.content_text and document.content_markdown."""
+    from typer.testing import CliRunner
+    from grogbot_cli.app import app as cli_app
+    from grogbot_search import load_config
+    import json
+
+    source = service.upsert_source("example.com", name="Example")
+    service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/summary",
+        title="Summary",
+        published_at=None,
+        content_markdown="hello world summary content",
+    )
+
+    runner = CliRunner()
+    config = load_config()
+    config.db_path = service.db_path
+
+    with patch("grogbot_cli.app.load_config", return_value=config):
+        result = runner.invoke(cli_app, ["search", "query", "hello", "--limit", "1", "--summary"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert len(data) == 1
+    assert "content_markdown" not in data[0]["document"]
+    assert "content_text" not in data[0]["chunk"]

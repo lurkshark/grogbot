@@ -139,7 +139,23 @@ def ingest_sitemap(sitemap_url: str = typer.Argument(..., help="Sitemap URL to i
 
 
 @search_app.command("query")
-def query(text: str = typer.Argument(..., help="Search query"), limit: int = typer.Option(10, "--limit")):
+def query(
+    text: str = typer.Argument(..., help="Search query"),
+    limit: int = typer.Option(10, "--limit"),
+    summary: bool = typer.Option(
+        False,
+        "--summary",
+        help="Omit content_markdown/content_text from each search result",
+    ),
+):
     with _service() as service:
         results = service.search(text, limit=limit)
-    typer.echo(_dump([result.model_dump() for result in results]))
+
+    exclude = None
+    if summary:
+        exclude = {
+            "document": {"content_markdown"},
+            "chunk": {"content_text"},
+        }
+
+    typer.echo(_dump([result.model_dump(exclude=exclude) for result in results]))

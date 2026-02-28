@@ -29,6 +29,22 @@ def test_create_documents_from_feed(service: SearchService, http_server):
     assert source.rss_feed == f"{http_server}/feed"
 
 
+def test_create_documents_from_feed_backfills_missing_source_attributes(service: SearchService, http_server):
+    document = service.create_document_from_url(f"{http_server}/article")
+
+    source_before = service.get_source(document.source_id)
+    assert source_before is not None
+    assert source_before.name is None
+    assert source_before.rss_feed is None
+
+    service.create_documents_from_feed(f"{http_server}/feed")
+
+    source_after = service.get_source(document.source_id)
+    assert source_after is not None
+    assert source_after.name == "Test Feed"
+    assert source_after.rss_feed == f"{http_server}/feed"
+
+
 def test_create_documents_from_opml_multi_feed(service: SearchService, http_server):
     documents = service.create_documents_from_opml(f"{http_server}/opml")
 

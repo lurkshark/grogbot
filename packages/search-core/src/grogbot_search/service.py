@@ -412,6 +412,7 @@ class SearchService:
         import feedparser
 
         feed = feedparser.parse(feed_url)
+        feed_name = feed.feed.get("title")
         documents: List[Document] = []
         for entry in feed.entries:
             entry_url = entry.get("link") or entry.get("id")
@@ -423,9 +424,18 @@ class SearchService:
             if not source:
                 source = self.upsert_source(
                     canonical_domain=canonical_domain,
-                    name=feed.feed.get("title"),
+                    name=feed_name,
                     rss_feed=feed_url,
                 )
+            else:
+                updated_name = source.name or feed_name
+                updated_rss_feed = source.rss_feed or feed_url
+                if updated_name != source.name or updated_rss_feed != source.rss_feed:
+                    source = self.upsert_source(
+                        canonical_domain=canonical_domain,
+                        name=updated_name,
+                        rss_feed=updated_rss_feed,
+                    )
             content = None
             if entry.get("content"):
                 content = entry.content[0].value

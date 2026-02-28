@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python <3.11
+    import tomli as tomllib  # type: ignore
 
 import typer
 from dateutil import parser as date_parser
@@ -32,6 +38,36 @@ def _parse_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
     return date_parser.parse(value)
+
+
+def _bootstrap_sources_path() -> Path:
+    return Path(__file__).resolve().parents[4] / "sources.toml"
+
+
+def _load_bootstrap_sources(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        raise ValueError(f"sources.toml not found at {path}")
+
+    with path.open("rb") as handle:
+        data = tomllib.load(handle)
+
+    entries = data.get("source", []) if isinstance(data, dict) else []
+    if not isinstance(entries, list):
+        raise ValueError("sources.toml must define [[source]] entries")
+
+    sources: list[dict[str, str]] = []
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise ValueError(f"source entry #{index + 1} must be a table")
+        sitemap = entry.get("sitemap")
+        feed = entry.get("feed")
+        if not isinstance(sitemap, str) or not sitemap.strip():
+            raise ValueError(f"source entry #{index + 1} must include a non-empty sitemap")
+        if not isinstance(feed, str) or not feed.strip():
+            raise ValueError(f"source entry #{index + 1} must include a non-empty feed")
+        sources.append({"sitemap": sitemap.strip(), "feed": feed.strip()})
+
+    return sources
 
 
 @source_app.command("upsert")
@@ -136,6 +172,24 @@ def ingest_sitemap(sitemap_url: str = typer.Argument(..., help="Sitemap URL to i
     with _service() as service:
         documents = service.create_documents_from_sitemap(sitemap_url)
     typer.echo(_dump([doc.model_dump() for doc in documents]))
+
+
+@search_app.command("bootstrap")
+def bootstrap():
+    sources_path = _bootstrap_sources_path()
+    try:
+        sources = _load_bootstrap_sources(sources_path)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    all_documents = []
+    with _service() as service:
+        for source in sources:
+            all_documents.extend(service.create_documents_from_sitemap(source["sitemap"]))
+        for source in sources:
+            all_documents.extend(service.create_documents_from_feed(source["feed"]))
+
+    typer.echo(_dump([doc.model_dump() for doc in all_documents]))
 
 
 @search_app.command("query")

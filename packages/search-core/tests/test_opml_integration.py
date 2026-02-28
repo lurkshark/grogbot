@@ -265,3 +265,65 @@ def test_cli_query_summary_omits_large_content_fields(service: SearchService):
     assert len(data) == 1
     assert "content_markdown" not in data[0]["document"]
     assert "content_text" not in data[0]["chunk"]
+
+
+def test_cli_bootstrap_reads_sources_and_runs_sitemaps_then_feeds(service: SearchService, tmp_path):
+    """Bootstrap should process all sitemaps first, then all feeds from sources.toml."""
+    from typer.testing import CliRunner
+    from grogbot_cli.app import app as cli_app
+    from grogbot_search import load_config
+    import json
+
+    sources_path = tmp_path / "sources.toml"
+    sources_path.write_text(
+        """
+[[source]]
+sitemap = "https://example.com/sitemap-1.xml"
+feed = "https://example.com/feed-1.xml"
+
+[[source]]
+sitemap = "https://example.com/sitemap-2.xml"
+feed = "https://example.com/feed-2.xml"
+""".strip()
+    )
+
+    call_order: list[tuple[str, str]] = []
+
+    def sitemap_side_effect(_self, sitemap_url: str):
+        call_order.append(("sitemap", sitemap_url))
+        return []
+
+    def feed_side_effect(_self, feed_url: str):
+        call_order.append(("feed", feed_url))
+        return []
+
+    runner = CliRunner()
+    config = load_config()
+    config.db_path = service.db_path
+
+    with (
+        patch("grogbot_cli.app.load_config", return_value=config),
+        patch("grogbot_cli.app._bootstrap_sources_path", return_value=sources_path),
+        patch.object(
+            SearchService,
+            "create_documents_from_sitemap",
+            autospec=True,
+            side_effect=sitemap_side_effect,
+        ),
+        patch.object(
+            SearchService,
+            "create_documents_from_feed",
+            autospec=True,
+            side_effect=feed_side_effect,
+        ),
+    ):
+        result = runner.invoke(cli_app, ["search", "bootstrap"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == []
+    assert call_order == [
+        ("sitemap", "https://example.com/sitemap-1.xml"),
+        ("sitemap", "https://example.com/sitemap-2.xml"),
+        ("feed", "https://example.com/feed-1.xml"),
+        ("feed", "https://example.com/feed-2.xml"),
+    ]

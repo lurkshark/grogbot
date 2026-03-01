@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import re
+import time
 import pysqlite3 as sqlite3
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -516,6 +517,7 @@ class SearchService:
 
         documents: List[Document] = []
         for page_url in unique_urls:
+            start_time = time.monotonic()
             try:
                 documents.append(self.create_document_from_url(page_url))
             except BackoffError:
@@ -524,6 +526,10 @@ class SearchService:
             except Exception:
                 # Best-effort: continue processing remaining URLs on failure
                 continue
+            finally:
+                elapsed = time.monotonic() - start_time
+                if elapsed < 1.0:
+                    time.sleep(1.0 - elapsed)
 
         return documents
 

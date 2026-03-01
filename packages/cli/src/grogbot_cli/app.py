@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -176,13 +177,24 @@ def bootstrap():
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
+    sources_list = list(sources)
     with _service() as service:
-        for source in sources:
-            if "sitemap" in source and source["sitemap"]:
-                service.create_documents_from_sitemap(source["sitemap"])
-        for source in sources:
-            if "feed" in source and source["feed"]:
-                service.create_documents_from_feed(source["feed"])
+        for source in sources_list:
+            sitemap = source.get("sitemap")
+            if not sitemap:
+                continue
+            try:
+                service.create_documents_from_sitemap(sitemap)
+            except Exception as exc:
+                print(f"Bootstrap failed for sitemap {sitemap}: {exc}", file=sys.stderr)
+        for source in sources_list:
+            feed = source.get("feed")
+            if not feed:
+                continue
+            try:
+                service.create_documents_from_feed(feed)
+            except Exception as exc:
+                print(f"Bootstrap failed for feed {feed}: {exc}", file=sys.stderr)
 
 
 @search_app.command("query")

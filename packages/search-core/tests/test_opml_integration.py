@@ -369,7 +369,12 @@ feed = "https://example.com/feed-2.xml"
         result = runner.invoke(cli_app, ["search", "bootstrap"])
 
     assert result.exit_code == 0
-    assert result.output == ""
+    assert result.output == (
+        "Scraping sitemap https://example.com/sitemap-1.xml\n"
+        "Scraping sitemap https://example.com/sitemap-2.xml\n"
+        "Scraping feed https://example.com/feed-1.xml\n"
+        "Scraping feed https://example.com/feed-2.xml\n"
+    )
     assert call_order == [
         ("sitemap", "https://example.com/sitemap-1.xml", True),
         ("sitemap", "https://example.com/sitemap-2.xml", True),

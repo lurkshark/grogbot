@@ -183,6 +183,7 @@ def bootstrap():
             sitemap = source.get("sitemap")
             if not sitemap:
                 continue
+            typer.echo(f"Scraping sitemap {sitemap}")
             try:
                 service.create_documents_from_sitemap(sitemap, bootstrap=True)
             except Exception as exc:
@@ -191,6 +192,7 @@ def bootstrap():
             feed = source.get("feed")
             if not feed:
                 continue
+            typer.echo(f"Scraping feed {feed}")
             try:
                 service.create_documents_from_feed(feed)
             except Exception as exc:

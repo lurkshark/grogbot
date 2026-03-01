@@ -414,7 +414,13 @@ class SearchService:
             )
         return created
 
-    def _create_document_from_html(self, url: str, html: str) -> Document:
+    def create_document_from_url(self, url: str) -> Document:
+        response = httpx.get(url, timeout=20.0)
+        backoff_reason = _classify_backoff_response(response)
+        if backoff_reason:
+            raise BackoffError(f"Backoff detected while ingesting URL {url}: {backoff_reason}")
+        response.raise_for_status()
+        html = response.text
         canonical_url = _extract_canonical_url(html, url)
         canonical_domain = _normalize_domain(canonical_url)
         source = self._get_source_by_domain(canonical_domain)
@@ -432,14 +438,6 @@ class SearchService:
             published_at=published_at,
             content_markdown=content_markdown,
         )
-
-    def create_document_from_url(self, url: str) -> Document:
-        response = httpx.get(url, timeout=20.0)
-        backoff_reason = _classify_backoff_response(response)
-        if backoff_reason:
-            raise BackoffError(f"Backoff detected while ingesting URL {url}: {backoff_reason}")
-        response.raise_for_status()
-        return self._create_document_from_html(url, response.text)
 
     def create_documents_from_feed(self, feed_url: str) -> List[Document]:
         import feedparser

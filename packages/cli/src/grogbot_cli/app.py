@@ -184,7 +184,7 @@ def bootstrap():
             if not sitemap:
                 continue
             try:
-                service.create_documents_from_sitemap(sitemap)
+                service.create_documents_from_sitemap(sitemap, bootstrap=True)
             except Exception as exc:
                 print(f"Bootstrap failed for sitemap {sitemap}: {exc}", file=sys.stderr)
         for source in sources_list:

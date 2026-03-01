@@ -506,7 +506,7 @@ class SearchService:
 
         return all_documents
 
-    def create_documents_from_sitemap(self, sitemap_url: str) -> List[Document]:
+    def create_documents_from_sitemap(self, sitemap_url: str, bootstrap: bool = False) -> List[Document]:
         """Fetch and parse sitemap XML, then ingest each URL entry with best-effort handling."""
         response = httpx.get(sitemap_url, timeout=20.0)
         response.raise_for_status()
@@ -517,6 +517,15 @@ class SearchService:
 
         documents: List[Document] = []
         for page_url in unique_urls:
+            canonical_url = _canonicalize_url(page_url)
+            if bootstrap:
+                existing = self.connection.execute(
+                    "SELECT 1 FROM documents WHERE canonical_url = ? LIMIT 1",
+                    (canonical_url,),
+                ).fetchone()
+                if existing:
+                    continue
+
             start_time = time.monotonic()
             try:
                 documents.append(self.create_document_from_url(page_url))

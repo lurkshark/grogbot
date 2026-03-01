@@ -338,8 +338,8 @@ feed = "https://example.com/feed-2.xml"
 
     call_order: list[tuple[str, str]] = []
 
-    def sitemap_side_effect(_self, sitemap_url: str):
-        call_order.append(("sitemap", sitemap_url))
+    def sitemap_side_effect(_self, sitemap_url: str, bootstrap: bool = False):
+        call_order.append(("sitemap", sitemap_url, bootstrap))
         return []
 
     def feed_side_effect(_self, feed_url: str):
@@ -371,8 +371,8 @@ feed = "https://example.com/feed-2.xml"
     assert result.exit_code == 0
     assert result.output == ""
     assert call_order == [
-        ("sitemap", "https://example.com/sitemap-1.xml"),
-        ("sitemap", "https://example.com/sitemap-2.xml"),
+        ("sitemap", "https://example.com/sitemap-1.xml", True),
+        ("sitemap", "https://example.com/sitemap-2.xml", True),
         ("feed", "https://example.com/feed-1.xml"),
         ("feed", "https://example.com/feed-2.xml"),
     ]

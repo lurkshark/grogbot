@@ -127,6 +127,74 @@ def http_server():
     </rss>
     """
 
+    responses["/feed-paginated"] = f"""
+    <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom">
+      <channel>
+        <title>Paginated Feed</title>
+        <atom:link rel="next" href="{base_url}/feed-paginated-2" />
+        <item>
+          <title>Paginated Entry 1</title>
+          <link>{base_url}/feed-paginated-entry-1</link>
+          <guid>{base_url}/feed-paginated-entry-1</guid>
+          <content:encoded><![CDATA[<p>Paginated entry one.</p>]]></content:encoded>
+          <pubDate>Fri, 03 Jan 2025 12:00:00 GMT</pubDate>
+        </item>
+      </channel>
+    </rss>
+    """
+
+    responses["/feed-paginated-2"] = f"""
+    <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom">
+      <channel>
+        <title>Paginated Feed</title>
+        <item>
+          <title>Paginated Entry 2</title>
+          <link>{base_url}/feed-paginated-entry-2</link>
+          <guid>{base_url}/feed-paginated-entry-2</guid>
+          <content:encoded><![CDATA[<p>Paginated entry two.</p>]]></content:encoded>
+          <pubDate>Sat, 04 Jan 2025 12:00:00 GMT</pubDate>
+        </item>
+      </channel>
+    </rss>
+    """
+
+    responses["/feed-loop"] = f"""
+    <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom">
+      <channel>
+        <title>Loop Feed</title>
+        <atom:link rel="next" href="{base_url}/feed-loop" />
+        <item>
+          <title>Loop Entry</title>
+          <link>{base_url}/feed-loop-entry</link>
+          <guid>{base_url}/feed-loop-entry</guid>
+          <content:encoded><![CDATA[<p>Loop entry.</p>]]></content:encoded>
+          <pubDate>Sun, 05 Jan 2025 12:00:00 GMT</pubDate>
+        </item>
+      </channel>
+    </rss>
+    """
+
+    responses["/feed-paginated-error"] = f"""
+    <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom">
+      <channel>
+        <title>Error Feed</title>
+        <atom:link rel="next" href="{base_url}/feed-paginated-error-2" />
+        <item>
+          <title>Error Entry</title>
+          <link>{base_url}/feed-paginated-error-entry</link>
+          <guid>{base_url}/feed-paginated-error-entry</guid>
+          <content:encoded><![CDATA[<p>Error entry.</p>]]></content:encoded>
+          <pubDate>Mon, 06 Jan 2025 12:00:00 GMT</pubDate>
+        </item>
+      </channel>
+    </rss>
+    """
+
+    responses["/feed-paginated-error-2"] = {
+        "status": 500,
+        "body": "Server error",
+    }
+
     responses["/invalid-feed"] = "NOT VALID XML"
 
     responses["/opml"] = f"""<?xml version="1.0" encoding="UTF-8"?>

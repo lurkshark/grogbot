@@ -31,10 +31,12 @@ class IngestUrlRequest(BaseModel):
 
 class IngestFeedRequest(BaseModel):
     feed_url: str
+    paginate: bool = False
 
 
 class IngestOpmlRequest(BaseModel):
     opml_url: str
+    paginate: bool = False
 
 
 class IngestSitemapRequest(BaseModel):
@@ -113,12 +115,12 @@ def ingest_url(payload: IngestUrlRequest, service: SearchService = Depends(get_s
 
 @app.post("/search/ingest/feed")
 def ingest_feed(payload: IngestFeedRequest, service: SearchService = Depends(get_service)):
-    return service.create_documents_from_feed(payload.feed_url)
+    return service.create_documents_from_feed(payload.feed_url, paginate=payload.paginate)
 
 
 @app.post("/search/ingest/opml")
 def ingest_opml(payload: IngestOpmlRequest, service: SearchService = Depends(get_service)):
-    return service.create_documents_from_opml(payload.opml_url)
+    return service.create_documents_from_opml(payload.opml_url, paginate=payload.paginate)
 
 
 @app.post("/search/ingest/sitemap")

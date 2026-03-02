@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 import httpx
 from dateutil import parser as date_parser
@@ -440,53 +440,101 @@ class SearchService:
             content_markdown=content_markdown,
         )
 
-    def create_documents_from_feed(self, feed_url: str) -> List[Document]:
+    def create_documents_from_feed(self, feed_url: str, paginate: bool = False) -> List[Document]:
         import feedparser
 
-        feed = feedparser.parse(feed_url)
-        feed_name = feed.feed.get("title")
+        def _next_feed_url(parsed_feed, base_url: str) -> Optional[str]:
+            for link in parsed_feed.feed.get("links") or []:
+                if link.get("rel") != "next":
+                    continue
+                href = link.get("href") or link.get("url")
+                if href:
+                    return _canonicalize_url(urljoin(base_url, href))
+            return None
+
         documents: List[Document] = []
-        for entry in feed.entries:
-            entry_url = entry.get("link") or entry.get("id")
-            if not entry_url:
-                continue
-            canonical_url = _canonicalize_url(entry_url)
-            canonical_domain = _normalize_domain(canonical_url)
-            source = self._get_source_by_domain(canonical_domain)
-            if not source:
-                source = self.upsert_source(
-                    canonical_domain=canonical_domain,
-                    name=feed_name,
-                    rss_feed=feed_url,
-                )
-            else:
-                updated_name = source.name or feed_name
-                updated_rss_feed = source.rss_feed or feed_url
-                if updated_name != source.name or updated_rss_feed != source.rss_feed:
+        seen_feed_urls: set[str] = set()
+        current_url = feed_url
+        feed_name: Optional[str] = None
+        pages_processed = 0
+
+        while current_url:
+            normalized_url = _canonicalize_url(current_url)
+            if normalized_url in seen_feed_urls:
+                break
+            seen_feed_urls.add(normalized_url)
+            pages_processed += 1
+
+            try:
+                feed = feedparser.parse(current_url)
+            except Exception:
+                if pages_processed == 1:
+                    raise
+                break
+
+            if pages_processed > 1:
+                status = getattr(feed, "status", None)
+                if status is not None and status >= 400:
+                    break
+                if getattr(feed, "bozo", 0) and not feed.entries:
+                    break
+
+            page_feed_name = feed.feed.get("title")
+            if page_feed_name:
+                feed_name = feed_name or page_feed_name
+
+            for entry in feed.entries:
+                entry_url = entry.get("link") or entry.get("id")
+                if not entry_url:
+                    continue
+                canonical_url = _canonicalize_url(entry_url)
+                canonical_domain = _normalize_domain(canonical_url)
+                source = self._get_source_by_domain(canonical_domain)
+                if not source:
                     source = self.upsert_source(
                         canonical_domain=canonical_domain,
-                        name=updated_name,
-                        rss_feed=updated_rss_feed,
+                        name=feed_name,
+                        rss_feed=feed_url,
                     )
-            content = None
-            if entry.get("content"):
-                content = entry.content[0].value
-            content = content or entry.get("summary") or ""
-            content_markdown = html_to_markdown(content)
-            title = entry.get("title")
-            published_at = _parse_datetime(entry.get("published") or entry.get("updated"))
-            documents.append(
-                self.upsert_document(
-                    source_id=source.id,
-                    canonical_url=canonical_url,
-                    title=title,
-                    published_at=published_at,
-                    content_markdown=content_markdown,
+                else:
+                    updated_name = source.name or feed_name
+                    updated_rss_feed = source.rss_feed or feed_url
+                    if updated_name != source.name or updated_rss_feed != source.rss_feed:
+                        source = self.upsert_source(
+                            canonical_domain=canonical_domain,
+                            name=updated_name,
+                            rss_feed=updated_rss_feed,
+                        )
+                content = None
+                if entry.get("content"):
+                    content = entry.content[0].value
+                content = content or entry.get("summary") or ""
+                content_markdown = html_to_markdown(content)
+                title = entry.get("title")
+                published_at = _parse_datetime(entry.get("published") or entry.get("updated"))
+                documents.append(
+                    self.upsert_document(
+                        source_id=source.id,
+                        canonical_url=canonical_url,
+                        title=title,
+                        published_at=published_at,
+                        content_markdown=content_markdown,
+                    )
                 )
-            )
+
+            if not paginate:
+                break
+            if pages_processed >= 100:
+                break
+
+            next_url = _next_feed_url(feed, current_url)
+            if not next_url:
+                break
+            current_url = next_url
+
         return documents
 
-    def create_documents_from_opml(self, opml_url: str) -> List[Document]:
+    def create_documents_from_opml(self, opml_url: str, paginate: bool = False) -> List[Document]:
         """Fetch and parse OPML, then ingest documents from each feed URL with best-effort handling."""
         response = httpx.get(opml_url, timeout=20.0)
         response.raise_for_status()
@@ -498,7 +546,7 @@ class SearchService:
         all_documents: List[Document] = []
         for feed_url in unique_urls:
             try:
-                docs = self.create_documents_from_feed(feed_url)
+                docs = self.create_documents_from_feed(feed_url, paginate=paginate)
                 all_documents.extend(docs)
             except Exception:
                 # Best-effort: continue processing remaining feeds on failure

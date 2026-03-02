@@ -62,6 +62,36 @@ def test_create_documents_from_feed_backfills_missing_source_attributes(service:
     assert source_after.rss_feed == f"{http_server}/feed"
 
 
+def test_create_documents_from_feed_pagination_disabled(service: SearchService, http_server):
+    documents = service.create_documents_from_feed(f"{http_server}/feed-paginated")
+
+    assert len(documents) == 1
+    assert documents[0].canonical_url == f"{http_server}/feed-paginated-entry-1"
+
+
+def test_create_documents_from_feed_pagination_enabled(service: SearchService, http_server):
+    documents = service.create_documents_from_feed(f"{http_server}/feed-paginated", paginate=True)
+
+    assert len(documents) == 2
+    urls = {doc.canonical_url for doc in documents}
+    assert f"{http_server}/feed-paginated-entry-1" in urls
+    assert f"{http_server}/feed-paginated-entry-2" in urls
+
+
+def test_create_documents_from_feed_pagination_stops_on_loop(service: SearchService, http_server):
+    documents = service.create_documents_from_feed(f"{http_server}/feed-loop", paginate=True)
+
+    assert len(documents) == 1
+    assert documents[0].canonical_url == f"{http_server}/feed-loop-entry"
+
+
+def test_create_documents_from_feed_pagination_best_effort(service: SearchService, http_server):
+    documents = service.create_documents_from_feed(f"{http_server}/feed-paginated-error", paginate=True)
+
+    assert len(documents) == 1
+    assert documents[0].canonical_url == f"{http_server}/feed-paginated-error-entry"
+
+
 def test_create_documents_from_opml_multi_feed(service: SearchService, http_server):
     documents = service.create_documents_from_opml(f"{http_server}/opml")
 

@@ -149,16 +149,22 @@ def ingest_url(url: str = typer.Argument(..., help="URL to ingest")):
 
 
 @search_app.command("ingest-feed")
-def ingest_feed(feed_url: str = typer.Argument(..., help="Feed URL to ingest")):
+def ingest_feed(
+    feed_url: str = typer.Argument(..., help="Feed URL to ingest"),
+    paginate: bool = typer.Option(False, "--paginate", help="Follow rel=next pagination"),
+):
     with _service() as service:
-        documents = service.create_documents_from_feed(feed_url)
+        documents = service.create_documents_from_feed(feed_url, paginate=paginate)
     typer.echo(_dump([doc.model_dump() for doc in documents]))
 
 
 @search_app.command("ingest-opml")
-def ingest_opml(opml_url: str = typer.Argument(..., help="OPML URL to ingest")):
+def ingest_opml(
+    opml_url: str = typer.Argument(..., help="OPML URL to ingest"),
+    paginate: bool = typer.Option(False, "--paginate", help="Follow rel=next pagination for feeds"),
+):
     with _service() as service:
-        documents = service.create_documents_from_opml(opml_url)
+        documents = service.create_documents_from_opml(opml_url, paginate=paginate)
     typer.echo(_dump([doc.model_dump() for doc in documents]))
 
 
@@ -194,7 +200,7 @@ def bootstrap():
                 continue
             typer.echo(f"Scraping feed {feed}")
             try:
-                service.create_documents_from_feed(feed)
+                service.create_documents_from_feed(feed, paginate=True)
             except Exception as exc:
                 print(f"Bootstrap failed for feed {feed}: {exc}", file=sys.stderr)
 

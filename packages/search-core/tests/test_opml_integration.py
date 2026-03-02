@@ -32,7 +32,18 @@ def test_api_ingest_opml_endpoint_exists(api_client):
         response = api_client.post("/search/ingest/opml", json={"opml_url": "http://example.com/opml"})
 
     assert response.status_code == 200
-    mock_opml.assert_called_once_with("http://example.com/opml")
+    mock_opml.assert_called_once_with("http://example.com/opml", paginate=False)
+
+
+def test_api_ingest_opml_accepts_paginate_flag(api_client):
+    with patch.object(SearchService, "create_documents_from_opml", return_value=[]) as mock_opml:
+        response = api_client.post(
+            "/search/ingest/opml",
+            json={"opml_url": "http://example.com/opml", "paginate": True},
+        )
+
+    assert response.status_code == 200
+    mock_opml.assert_called_once_with("http://example.com/opml", paginate=True)
 
 
 def test_api_ingest_opml_returns_documents(api_client, service: SearchService):
@@ -87,6 +98,33 @@ def test_cli_ingest_opml_command(service: SearchService, http_server):
     urls = {doc["canonical_url"] for doc in data}
     assert f"{http_server}/feed-entry" in urls
     assert f"{http_server}/feed2-entry" in urls
+
+
+def test_cli_ingest_opml_paginate_option(service: SearchService, http_server):
+    from typer.testing import CliRunner
+    from grogbot_cli.app import app as cli_app
+    from grogbot_search import load_config
+
+    runner = CliRunner()
+    config = load_config()
+    config.db_path = service.db_path
+
+    with (
+        patch("grogbot_cli.app.load_config", return_value=config),
+        patch.object(
+            SearchService,
+            "create_documents_from_opml",
+            autospec=True,
+            return_value=[],
+        ) as mock_opml,
+    ):
+        result = runner.invoke(cli_app, ["search", "ingest-opml", f"{http_server}/opml", "--paginate"])
+
+    assert result.exit_code == 0
+    assert mock_opml.call_count == 1
+    args, kwargs = mock_opml.call_args
+    assert args[1] == f"{http_server}/opml"
+    assert kwargs == {"paginate": True}
 
 
 def test_cli_ingest_opml_output_matches_feed_ingest(service: SearchService, http_server):
@@ -336,14 +374,14 @@ feed = "https://example.com/feed-2.xml"
 """.strip()
     )
 
-    call_order: list[tuple[str, str]] = []
+    call_order: list[tuple[str, str, bool]] = []
 
     def sitemap_side_effect(_self, sitemap_url: str, bootstrap: bool = False):
         call_order.append(("sitemap", sitemap_url, bootstrap))
         return []
 
-    def feed_side_effect(_self, feed_url: str):
-        call_order.append(("feed", feed_url))
+    def feed_side_effect(_self, feed_url: str, paginate: bool = False):
+        call_order.append(("feed", feed_url, paginate))
         return []
 
     runner = CliRunner()
@@ -378,6 +416,6 @@ feed = "https://example.com/feed-2.xml"
     assert call_order == [
         ("sitemap", "https://example.com/sitemap-1.xml", True),
         ("sitemap", "https://example.com/sitemap-2.xml", True),
-        ("feed", "https://example.com/feed-1.xml"),
-        ("feed", "https://example.com/feed-2.xml"),
+        ("feed", "https://example.com/feed-1.xml", True),
+        ("feed", "https://example.com/feed-2.xml", True),
     ]

@@ -78,6 +78,15 @@ def test_create_documents_from_feed_pagination_enabled(service: SearchService, h
     assert f"{http_server}/feed-paginated-entry-2" in urls
 
 
+def test_create_documents_from_feed_wordpress_pagination(service: SearchService, http_server):
+    documents = service.create_documents_from_feed(f"{http_server}/wp-feed", paginate=True)
+
+    assert len(documents) == 2
+    urls = {doc.canonical_url for doc in documents}
+    assert f"{http_server}/wp-feed-entry-1" in urls
+    assert f"{http_server}/wp-feed-entry-2" in urls
+
+
 def test_create_documents_from_feed_pagination_stops_on_loop(service: SearchService, http_server):
     documents = service.create_documents_from_feed(f"{http_server}/feed-loop", paginate=True)
 

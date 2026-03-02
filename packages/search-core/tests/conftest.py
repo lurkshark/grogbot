@@ -158,6 +158,38 @@ def http_server():
     </rss>
     """
 
+    responses["/wp-feed"] = f"""
+    <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+      <channel>
+        <title>WordPress Feed</title>
+        <generator>WordPress</generator>
+        <item>
+          <title>WordPress Entry 1</title>
+          <link>{base_url}/wp-feed-entry-1</link>
+          <guid>{base_url}/wp-feed-entry-1</guid>
+          <content:encoded><![CDATA[<p>WordPress entry one.</p>]]></content:encoded>
+          <pubDate>Sun, 07 Jan 2025 12:00:00 GMT</pubDate>
+        </item>
+      </channel>
+    </rss>
+    """
+
+    responses["/wp-feed?paged=2"] = f"""
+    <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+      <channel>
+        <title>WordPress Feed</title>
+        <generator>WordPress</generator>
+        <item>
+          <title>WordPress Entry 2</title>
+          <link>{base_url}/wp-feed-entry-2</link>
+          <guid>{base_url}/wp-feed-entry-2</guid>
+          <content:encoded><![CDATA[<p>WordPress entry two.</p>]]></content:encoded>
+          <pubDate>Mon, 08 Jan 2025 12:00:00 GMT</pubDate>
+        </item>
+      </channel>
+    </rss>
+    """
+
     responses["/feed-loop"] = f"""
     <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom">
       <channel>

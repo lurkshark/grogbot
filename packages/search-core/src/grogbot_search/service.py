@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Optional
-from urllib.parse import urlparse, urljoin
+from urllib.parse import parse_qs, urlencode, urlparse, urljoin, urlunparse
 
 import httpx
 from dateutil import parser as date_parser
@@ -462,6 +462,27 @@ class SearchService:
                     return _canonicalize_url(urljoin(base_url, href))
             return None
 
+        def _is_wordpress_feed(parsed_feed) -> bool:
+            generator = parsed_feed.feed.get("generator")
+            if isinstance(generator, dict):
+                generator = generator.get("value") or generator.get("name")
+            if isinstance(generator, str):
+                return "wordpress" in generator.lower()
+            return False
+
+        def _next_wordpress_url(base_url: str) -> Optional[str]:
+            parsed_url = urlparse(base_url)
+            query_params = parse_qs(parsed_url.query, keep_blank_values=True)
+            current_page = 1
+            if "paged" in query_params and query_params["paged"]:
+                try:
+                    current_page = int(query_params["paged"][-1])
+                except (TypeError, ValueError):
+                    current_page = 1
+            query_params["paged"] = [str(current_page + 1)]
+            next_query = urlencode(query_params, doseq=True)
+            return _canonicalize_url(urlunparse(parsed_url._replace(query=next_query)))
+
         documents: List[Document] = []
         seen_feed_urls: set[str] = set()
         current_url = feed_url
@@ -538,6 +559,8 @@ class SearchService:
                 break
 
             next_url = _next_feed_url(feed, current_url)
+            if not next_url and _is_wordpress_feed(feed):
+                next_url = _next_wordpress_url(current_url)
             if not next_url:
                 break
             current_url = next_url

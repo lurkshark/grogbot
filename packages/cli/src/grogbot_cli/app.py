@@ -176,7 +176,10 @@ def ingest_sitemap(sitemap_url: str = typer.Argument(..., help="Sitemap URL to i
 
 
 @search_app.command("bootstrap")
-def bootstrap():
+def bootstrap(
+    skip_feeds: bool = typer.Option(False, "--skip-feeds", help="Skip bootstrapping feeds"),
+    skip_sitemaps: bool = typer.Option(False, "--skip-sitemaps", help="Skip bootstrapping sitemaps"),
+):
     sources_path = _bootstrap_sources_path()
     try:
         sources = _load_bootstrap_sources(sources_path)
@@ -185,24 +188,26 @@ def bootstrap():
 
     sources_list = list(sources)
     with _service() as service:
-        for source in sources_list:
-            sitemap = source.get("sitemap")
-            if not sitemap:
-                continue
-            typer.echo(f"Scraping sitemap {sitemap}")
-            try:
-                service.create_documents_from_sitemap(sitemap, bootstrap=True)
-            except Exception as exc:
-                print(f"Bootstrap failed for sitemap {sitemap}: {exc}", file=sys.stderr)
-        for source in sources_list:
-            feed = source.get("feed")
-            if not feed:
-                continue
-            typer.echo(f"Scraping feed {feed}")
-            try:
-                service.create_documents_from_feed(feed, paginate=True)
-            except Exception as exc:
-                print(f"Bootstrap failed for feed {feed}: {exc}", file=sys.stderr)
+        if not skip_sitemaps:
+            for source in sources_list:
+                sitemap = source.get("sitemap")
+                if not sitemap:
+                    continue
+                typer.echo(f"Scraping sitemap {sitemap}")
+                try:
+                    service.create_documents_from_sitemap(sitemap, bootstrap=True)
+                except Exception as exc:
+                    print(f"Bootstrap failed for sitemap {sitemap}: {exc}", file=sys.stderr)
+        if not skip_feeds:
+            for source in sources_list:
+                feed = source.get("feed")
+                if not feed:
+                    continue
+                typer.echo(f"Scraping feed {feed}")
+                try:
+                    service.create_documents_from_feed(feed, paginate=True)
+                except Exception as exc:
+                    print(f"Bootstrap failed for feed {feed}: {exc}", file=sys.stderr)
 
 
 @search_app.command("query")

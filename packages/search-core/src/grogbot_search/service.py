@@ -38,6 +38,16 @@ _CAPTCHA_MARKERS = (
     "verify you are human",
 )
 
+_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.3"
+)
+_DEFAULT_HEADERS = {"User-Agent": _DEFAULT_USER_AGENT}
+
+
+def _http_get(url: str, timeout: float = 20.0) -> httpx.Response:
+    return httpx.get(url, timeout=timeout, headers=_DEFAULT_HEADERS)
+
 
 class BackoffError(RuntimeError):
     """Raised when URL ingestion encounters a backoff or anti-bot signal."""
@@ -416,7 +426,7 @@ class SearchService:
         return created
 
     def create_document_from_url(self, url: str) -> Document:
-        response = httpx.get(url, timeout=20.0)
+        response = _http_get(url, timeout=20.0)
         backoff_reason = _classify_backoff_response(response)
         if backoff_reason:
             raise BackoffError(f"Backoff detected while ingesting URL {url}: {backoff_reason}")
@@ -536,7 +546,7 @@ class SearchService:
 
     def create_documents_from_opml(self, opml_url: str, paginate: bool = False) -> List[Document]:
         """Fetch and parse OPML, then ingest documents from each feed URL with best-effort handling."""
-        response = httpx.get(opml_url, timeout=20.0)
+        response = _http_get(opml_url, timeout=20.0)
         response.raise_for_status()
         xml_content = response.text
 
@@ -556,7 +566,7 @@ class SearchService:
 
     def create_documents_from_sitemap(self, sitemap_url: str, bootstrap: bool = False) -> List[Document]:
         """Fetch and parse sitemap XML, then ingest each URL entry with best-effort handling."""
-        response = httpx.get(sitemap_url, timeout=20.0)
+        response = _http_get(sitemap_url, timeout=20.0)
         response.raise_for_status()
         xml_content = response.text
 

@@ -49,3 +49,11 @@ Install test dependencies for the search core and run pytest:
 uv sync --extra test
 uv run pytest packages/search-core/tests
 ```
+
+Run coverage checks with `pytest-cov`:
+
+```bash
+uv run --package grogbot-search-core --extra test \
+  pytest packages/search-core/tests \
+  --cov=grogbot_search --cov-report=term-missing
+```

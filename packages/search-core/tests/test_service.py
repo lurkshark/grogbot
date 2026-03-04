@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
+import pysqlite3 as sqlite3
 import pytest
 
+import grogbot_search.service as service_module
+from grogbot_search.models import Document
 from grogbot_search.service import BackoffError, DocumentNotFoundError, SearchService
 
 
@@ -560,3 +564,298 @@ def test_create_documents_from_sitemap_halts_on_backoff_and_keeps_prior_document
     stored_documents = service.list_documents()
     assert len(stored_documents) == 1
     assert stored_documents[0].canonical_url == f"{http_server}/canonical"
+
+
+def test_search_service_supports_context_manager(tmp_path):
+    db_path = tmp_path / "ctx" / "search.db"
+
+    with SearchService(db_path) as managed:
+        managed.connection.execute("SELECT 1")
+
+    with pytest.raises(sqlite3.ProgrammingError):
+        managed.connection.execute("SELECT 1")
+
+
+def test_get_source_missing_and_list_sources_order(service: SearchService):
+    assert service.get_source("missing") is None
+
+    source_b = service.upsert_source("b.example", name="B")
+    source_a = service.upsert_source("a.example", name="A")
+
+    sources = service.list_sources()
+
+    assert [source.id for source in sources] == [source_a.id, source_b.id]
+
+
+def test_document_has_chunks_reflects_chunk_lifecycle(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    document = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/chunks",
+        title="Chunks",
+        published_at=None,
+        content_markdown="chunk me",
+    )
+
+    assert service.document_has_chunks(document.id) is False
+
+    service.chunk_document(document.id)
+
+    assert service.document_has_chunks(document.id) is True
+
+
+def test_parse_datetime_returns_none_for_invalid_values():
+    assert service_module._parse_datetime(None) is None
+    assert service_module._parse_datetime("not a date") is None
+
+
+def test_search_returns_empty_when_ranked_chunk_rows_are_missing(service: SearchService):
+    service.connection.execute(
+        "INSERT INTO chunks_vec (rowid, embedding) VALUES (?, ?)",
+        (9999, service._sqlite_vec.serialize_float32([0.0] * 768)),
+    )
+    service.connection.commit()
+
+    assert service.search("orphan chunk", limit=5) == []
+
+
+def test_create_document_from_url_rejects_empty_extracted_content(service: SearchService, http_server, monkeypatch):
+    class EmptyReadable:
+        def __init__(self, _html: str):
+            pass
+
+        def summary(self):
+            return ""
+
+        def short_title(self):
+            return ""
+
+    monkeypatch.setattr(service_module, "ReadabilityDocument", EmptyReadable)
+
+    with pytest.raises(ValueError, match="Empty content"):
+        service.create_document_from_url(f"{http_server}/article")
+
+
+def test_create_documents_from_feed_skips_entries_without_url_or_content(service: SearchService, monkeypatch):
+    class Entry(dict):
+        def __getattr__(self, item):
+            try:
+                return self[item]
+            except KeyError as exc:  # pragma: no cover - parity with dict attribute lookup
+                raise AttributeError(item) from exc
+
+    parsed = SimpleNamespace(
+        feed={"title": "Edge Feed"},
+        entries=[
+            Entry(title="No URL", summary="<p>summary exists</p>"),
+            Entry(title="No Content", link="https://example.com/no-content"),
+        ],
+        status=200,
+        bozo=0,
+    )
+
+    monkeypatch.setattr("feedparser.parse", lambda _url: parsed)
+
+    documents = service.create_documents_from_feed("https://example.com/feed")
+
+    assert documents == []
+
+
+def test_create_documents_from_feed_wordpress_dict_generator_and_invalid_paged_value(
+    service: SearchService,
+    monkeypatch,
+):
+    urls_seen: list[str] = []
+
+    def fake_parse(url: str):
+        urls_seen.append(url)
+        if "paged=2" in url:
+            return SimpleNamespace(feed={"title": "WP", "generator": "WordPress"}, entries=[], status=404, bozo=0)
+        return SimpleNamespace(
+            feed={"title": "WP", "generator": {"name": "WordPress"}},
+            entries=[],
+            status=200,
+            bozo=0,
+        )
+
+    monkeypatch.setattr("feedparser.parse", fake_parse)
+
+    documents = service.create_documents_from_feed("https://example.com/wp-feed?paged=oops", paginate=True)
+
+    assert documents == []
+    assert urls_seen == [
+        "https://example.com/wp-feed?paged=oops",
+        "https://example.com/wp-feed?paged=2",
+    ]
+
+
+def test_create_documents_from_feed_reraises_parse_error_on_first_page(service: SearchService, monkeypatch):
+    def fake_parse(_url: str):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("feedparser.parse", fake_parse)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        service.create_documents_from_feed("https://example.com/feed", paginate=True)
+
+
+def test_create_documents_from_feed_stops_after_parse_error_on_later_page(service: SearchService, monkeypatch):
+    class Entry(dict):
+        def __getattr__(self, item):
+            try:
+                return self[item]
+            except KeyError as exc:  # pragma: no cover - parity with dict attribute lookup
+                raise AttributeError(item) from exc
+
+    calls = {"count": 0}
+
+    def fake_parse(url: str):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return SimpleNamespace(
+                feed={"title": "Paginated", "links": [{"rel": "next", "href": "https://example.com/feed-2"}]},
+                entries=[
+                    Entry(
+                        title="Entry 1",
+                        link="https://example.com/entry-1",
+                        content=[SimpleNamespace(value="<p>hello</p>")],
+                    )
+                ],
+                status=200,
+                bozo=0,
+            )
+        raise RuntimeError(f"failed for {url}")
+
+    monkeypatch.setattr("feedparser.parse", fake_parse)
+
+    documents = service.create_documents_from_feed("https://example.com/feed", paginate=True)
+
+    assert len(documents) == 1
+    assert documents[0].canonical_url == "https://example.com/entry-1"
+
+
+def test_create_documents_from_opml_continues_when_one_feed_ingestion_fails(
+    service: SearchService,
+    http_server,
+    monkeypatch,
+):
+    fallback_document = Document(
+        id="doc-fallback",
+        source_id="source-fallback",
+        canonical_url="https://example.com/fallback",
+        title="Fallback",
+        published_at=None,
+        content_markdown="fallback",
+    )
+
+    def fake_create_documents_from_feed(feed_url: str, paginate: bool = False):  # noqa: ARG001 - signature parity
+        if feed_url.endswith("/feed"):
+            raise RuntimeError("feed failed")
+        return [fallback_document]
+
+    monkeypatch.setattr(service, "create_documents_from_feed", fake_create_documents_from_feed)
+
+    documents = service.create_documents_from_opml(f"{http_server}/opml")
+
+    assert documents == [fallback_document]
+
+
+def test_create_documents_from_feed_ignores_non_next_links_when_paging(service: SearchService, monkeypatch):
+    class Entry(dict):
+        def __getattr__(self, item):
+            try:
+                return self[item]
+            except KeyError as exc:  # pragma: no cover - parity with dict attribute lookup
+                raise AttributeError(item) from exc
+
+    seen_urls: list[str] = []
+
+    def fake_parse(url: str):
+        seen_urls.append(url)
+        if url.endswith("page-2"):
+            return SimpleNamespace(feed={"title": "Feed"}, entries=[], status=200, bozo=0)
+        return SimpleNamespace(
+            feed={
+                "title": "Feed",
+                "links": [
+                    {"rel": "self", "href": "https://example.com/feed"},
+                    {"rel": "next", "href": "https://example.com/page-2"},
+                ],
+            },
+            entries=[
+                Entry(
+                    title="Entry 1",
+                    link="https://example.com/entry-1",
+                    content=[SimpleNamespace(value="<p>hello</p>")],
+                )
+            ],
+            status=200,
+            bozo=0,
+        )
+
+    monkeypatch.setattr("feedparser.parse", fake_parse)
+
+    documents = service.create_documents_from_feed("https://example.com/feed", paginate=True)
+
+    assert len(documents) == 1
+    assert seen_urls == ["https://example.com/feed", "https://example.com/page-2"]
+
+
+def test_create_documents_from_feed_stops_on_bozo_second_page_with_no_entries(service: SearchService, monkeypatch):
+    class Entry(dict):
+        def __getattr__(self, item):
+            try:
+                return self[item]
+            except KeyError as exc:  # pragma: no cover - parity with dict attribute lookup
+                raise AttributeError(item) from exc
+
+    parse_count = {"count": 0}
+
+    def fake_parse(url: str):
+        parse_count["count"] += 1
+        if parse_count["count"] == 1:
+            return SimpleNamespace(
+                feed={"title": "Feed", "links": [{"rel": "next", "href": "https://example.com/bozo-2"}]},
+                entries=[
+                    Entry(
+                        title="Entry 1",
+                        link="https://example.com/entry-1",
+                        content=[SimpleNamespace(value="<p>hello</p>")],
+                    )
+                ],
+                status=200,
+                bozo=0,
+            )
+        return SimpleNamespace(feed={"title": "Feed"}, entries=[], status=200, bozo=1)
+
+    monkeypatch.setattr("feedparser.parse", fake_parse)
+
+    documents = service.create_documents_from_feed("https://example.com/feed", paginate=True)
+
+    assert len(documents) == 1
+    assert documents[0].canonical_url == "https://example.com/entry-1"
+
+
+def test_create_documents_from_feed_pagination_caps_at_100_pages(service: SearchService, monkeypatch):
+    visited: list[str] = []
+
+    def fake_parse(url: str):
+        visited.append(url)
+        page = int(url.rsplit("=", 1)[-1])
+        return SimpleNamespace(
+            feed={"title": "Loop", "links": [{"rel": "next", "href": f"https://example.com/loop?page={page + 1}"}]},
+            entries=[],
+            status=200,
+            bozo=0,
+        )
+
+    monkeypatch.setattr("feedparser.parse", fake_parse)
+
+    documents = service.create_documents_from_feed("https://example.com/loop?page=1", paginate=True)
+
+    assert documents == []
+    assert len(visited) == 100
+
+
+def test_search_returns_empty_when_no_chunks_match_query(service: SearchService):
+    assert service.search("missing", limit=5) == []

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from urllib.parse import urlparse
 
+import httpx
 import pysqlite3 as sqlite3
 import pytest
 
@@ -235,6 +236,125 @@ def test_synchronize_document_chunks_non_positive_maximum_is_noop(service: Searc
     assert chunk_count == 0
 
 
+# Link graph behavior
+
+def test_chunk_document_stores_unique_outbound_links_per_target(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    document = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/source",
+        title="Source",
+        published_at=None,
+        content_markdown=(
+            "[one](https://example.com/target) "
+            "[two](https://example.com/target) "
+            "[three](https://example.com/other-target)"
+        ),
+    )
+
+    service.chunk_document(document.id)
+
+    links = service.connection.execute(
+        """
+        SELECT from_document_id, to_document_id
+        FROM links
+        WHERE from_document_id = ?
+        ORDER BY to_document_id
+        """,
+        (document.id,),
+    ).fetchall()
+
+    assert len(links) == 2
+    assert [row["to_document_id"] for row in links] == sorted(
+        [
+            service_module.document_id_for_url(service_module._canonicalize_url("https://example.com/target")),
+            service_module.document_id_for_url(service_module._canonicalize_url("https://example.com/other-target")),
+        ]
+    )
+
+
+def test_chunk_document_stores_unknown_targets_by_canonicalized_url(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    target_url = "https://example.com/not-ingested"
+    document = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/source",
+        title="Source",
+        published_at=None,
+        content_markdown=f"[unknown]({target_url})",
+    )
+
+    service.chunk_document(document.id)
+
+    link_row = service.connection.execute(
+        "SELECT to_document_id FROM links WHERE from_document_id = ?",
+        (document.id,),
+    ).fetchone()
+
+    assert link_row is not None
+    assert link_row["to_document_id"] == service_module.document_id_for_url(
+        service_module._canonicalize_url(target_url)
+    )
+
+
+def test_outbound_links_ignore_self_and_follow_content_delete_and_refresh_lifecycle(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    canonical_url = "https://example.com/lifecycle"
+    document = service.upsert_document(
+        source_id=source.id,
+        canonical_url=canonical_url,
+        title="Lifecycle",
+        published_at=None,
+        content_markdown=f"[self]({canonical_url}) [other](https://example.com/other)",
+    )
+
+    service.chunk_document(document.id)
+
+    links = service.connection.execute(
+        "SELECT to_document_id FROM links WHERE from_document_id = ? ORDER BY to_document_id",
+        (document.id,),
+    ).fetchall()
+    assert [row["to_document_id"] for row in links] == [
+        service_module.document_id_for_url(service_module._canonicalize_url("https://example.com/other"))
+    ]
+
+    updated = service.upsert_document(
+        source_id=source.id,
+        canonical_url=canonical_url,
+        title="Lifecycle updated",
+        published_at=None,
+        content_markdown="updated body with no links",
+    )
+
+    stale_links = service.connection.execute(
+        "SELECT COUNT(*) AS count FROM links WHERE from_document_id = ?",
+        (updated.id,),
+    ).fetchone()
+    assert stale_links["count"] == 0
+
+    service.connection.execute(
+        "UPDATE documents SET content_markdown = ? WHERE id = ?",
+        ("[refreshed](https://example.com/refreshed)", updated.id),
+    )
+    service.connection.commit()
+    service.chunk_document(updated.id)
+
+    refreshed_links = service.connection.execute(
+        "SELECT to_document_id FROM links WHERE from_document_id = ?",
+        (updated.id,),
+    ).fetchall()
+    assert [row["to_document_id"] for row in refreshed_links] == [
+        service_module.document_id_for_url(service_module._canonicalize_url("https://example.com/refreshed"))
+    ]
+
+    assert service.delete_document(updated.id) is True
+    remaining_links = service.connection.execute(
+        "SELECT COUNT(*) AS count FROM links WHERE from_document_id = ?",
+        (updated.id,),
+    ).fetchone()
+    assert remaining_links["count"] == 0
+
+
 # Search behavior
 
 def test_rank_fusion_search_returns_results(service: SearchService):
@@ -277,7 +397,8 @@ def test_rank_fusion_scores_are_reciprocal_and_additive(service: SearchService):
         expected_method_score = pytest.approx(1.0 / (1 + rank))
         assert result.fts_score == expected_method_score
         assert result.vector_score == expected_method_score
-        assert result.score == pytest.approx(result.fts_score + result.vector_score)
+        assert result.link_score == 0.0
+        assert result.score == pytest.approx(result.fts_score + result.vector_score + result.link_score)
 
 
 def test_rank_fusion_zero_fills_missing_method_score(service: SearchService):
@@ -297,7 +418,8 @@ def test_rank_fusion_zero_fills_missing_method_score(service: SearchService):
     top = results[0]
     assert top.fts_score == 0.0
     assert top.vector_score > 0.0
-    assert top.score == pytest.approx(top.fts_score + top.vector_score)
+    assert top.link_score == 0.0
+    assert top.score == pytest.approx(top.fts_score + top.vector_score + top.link_score)
 
 
 def test_search_respects_result_limit(service: SearchService):
@@ -333,7 +455,120 @@ def test_search_returns_empty_for_blank_query_or_non_positive_limit(service: Sea
     assert service.search("hello", limit=-1) == []
 
 
+def test_search_includes_link_score_with_deterministic_ties_and_zero_fill(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+
+    doc_a = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/a",
+        title="A",
+        published_at=None,
+        content_markdown="alpha",
+    )
+    doc_b = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/b",
+        title="B",
+        published_at=None,
+        content_markdown=f"alpha [a]({doc_a.canonical_url})",
+    )
+    doc_c = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/c",
+        title="C",
+        published_at=None,
+        content_markdown=f"alpha [a]({doc_a.canonical_url})",
+    )
+    doc_d = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/d",
+        title="D",
+        published_at=None,
+        content_markdown=f"alpha [b]({doc_b.canonical_url}) [c]({doc_c.canonical_url})",
+    )
+
+    service.chunk_document(doc_a.id)
+    service.chunk_document(doc_b.id)
+    service.chunk_document(doc_c.id)
+    service.chunk_document(doc_d.id)
+
+    results = service.search("alpha", limit=4)
+
+    assert len(results) == 4
+
+    by_document_id = {result.document.id: result for result in results}
+    for result in results:
+        assert result.score == pytest.approx(result.fts_score + result.vector_score + result.link_score)
+
+    assert by_document_id[doc_a.id].link_score == pytest.approx(1.0 / (1 + 1))
+    assert by_document_id[doc_d.id].link_score == 0.0
+
+    tied_doc_ids = sorted([doc_b.id, doc_c.id])
+    assert by_document_id[tied_doc_ids[0]].link_score == pytest.approx(1.0 / (1 + 2))
+    assert by_document_id[tied_doc_ids[1]].link_score == pytest.approx(1.0 / (1 + 3))
+
+
+def test_search_result_model_dump_contains_link_score(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    document = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/result-shape",
+        title="Result shape",
+        published_at=None,
+        content_markdown="alpha",
+    )
+    service.chunk_document(document.id)
+
+    results = service.search("alpha", limit=1)
+
+    assert len(results) == 1
+    payload = results[0].model_dump()
+    assert "link_score" in payload
+    assert isinstance(payload["link_score"], float)
+
+
 # Ingestion behavior implemented in service.py
+
+def test_non_feed_http_get_uses_configured_browser_headers(service: SearchService):
+    captured: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["request"] = request
+        return httpx.Response(200, text="ok")
+
+    service._http_client.close()
+    service._http_client = httpx.Client(
+        transport=httpx.MockTransport(handler),
+        headers=service_module._DEFAULT_HEADERS,
+    )
+
+    service._http_get("https://example.com/header-check")
+
+    request = captured["request"]
+    for header_name, expected_value in service_module._DEFAULT_HEADERS.items():
+        assert request.headers.get(header_name) == expected_value
+
+
+def test_non_feed_http_get_maintains_cookies_for_service_run(service: SearchService):
+    seen_cookie_headers: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_cookie_headers.append(request.headers.get("cookie"))
+        if request.url.path == "/set-cookie":
+            return httpx.Response(200, headers={"Set-Cookie": "sessionid=abc123; Path=/"}, text="set")
+        return httpx.Response(200, text="ok")
+
+    service._http_client.close()
+    service._http_client = httpx.Client(
+        transport=httpx.MockTransport(handler),
+        headers=service_module._DEFAULT_HEADERS,
+    )
+
+    service._http_get("https://example.com/set-cookie")
+    service._http_get("https://example.com/follow-up")
+
+    assert seen_cookie_headers == [None, "sessionid=abc123"]
+
 
 def test_create_document_from_url(service: SearchService, http_server):
     document = service.create_document_from_url(f"{http_server}/article")
@@ -609,6 +844,20 @@ def test_parse_datetime_returns_none_for_invalid_values():
     assert service_module._parse_datetime("not a date") is None
 
 
+def test_classify_backoff_response_checks_captcha_markers_only_in_html_body():
+    head_only = httpx.Response(
+        200,
+        text="<html><head><title>captcha challenge</title></head><body>all clear</body></html>",
+    )
+    assert service_module._classify_backoff_response(head_only) is None
+
+    body_marker = httpx.Response(
+        200,
+        text="<html><head><title>ok</title></head><body>Please verify you are human</body></html>",
+    )
+    assert service_module._classify_backoff_response(body_marker) == "body-marker=verify you are human"
+
+
 def test_search_returns_empty_when_ranked_chunk_rows_are_missing(service: SearchService):
     service.connection.execute(
         "INSERT INTO chunks_vec (rowid, embedding) VALUES (?, ?)",
@@ -617,6 +866,57 @@ def test_search_returns_empty_when_ranked_chunk_rows_are_missing(service: Search
     service.connection.commit()
 
     assert service.search("orphan chunk", limit=5) == []
+
+
+def test_search_skips_chunk_ids_missing_after_scoring(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    doc_a = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/missing-after-score-a",
+        title="A",
+        published_at=None,
+        content_markdown="alpha",
+    )
+    doc_b = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/missing-after-score-b",
+        title="B",
+        published_at=None,
+        content_markdown="alpha",
+    )
+    service.synchronize_document_chunks()
+
+    real_connection = service.connection
+
+    class DeletingConnectionProxy:
+        def __init__(self, connection):
+            self._connection = connection
+            self._deleted = False
+
+        def execute(self, sql, params=()):
+            if (
+                "FROM chunks" in sql
+                and "JOIN documents ON documents.id = chunks.document_id" in sql
+                and "WHERE chunks.id IN" in sql
+                and not self._deleted
+                and params
+            ):
+                self._connection.execute("DELETE FROM chunks WHERE id = ?", (params[0],))
+                self._connection.commit()
+                self._deleted = True
+            return self._connection.execute(sql, params)
+
+        def __getattr__(self, name):
+            return getattr(self._connection, name)
+
+    service.connection = DeletingConnectionProxy(real_connection)
+    try:
+        results = service.search("alpha", limit=2)
+    finally:
+        service.connection = real_connection
+
+    assert len(results) == 1
+    assert results[0].document.id in {doc_a.id, doc_b.id}
 
 
 def test_create_document_from_url_rejects_empty_extracted_content(service: SearchService, http_server, monkeypatch):

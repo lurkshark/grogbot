@@ -12,10 +12,11 @@ from typing import Iterable, List, Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urljoin, urlunparse
 
 import httpx
+import markdown
+from bs4 import BeautifulSoup
 from dateutil import parser as date_parser
 from markdownify import markdownify as html_to_markdown
 from readability import Document as ReadabilityDocument
-from bs4 import BeautifulSoup
 
 from grogbot_search.chunking import chunk_markdown
 from grogbot_search.embeddings import embed_texts
@@ -27,6 +28,7 @@ from grogbot_search.models import Chunk, Document, SearchResult, Source
 class SearchScores:
     fts: float
     vector: float
+    link: float
     hybrid: float
 
 
@@ -38,15 +40,18 @@ _CAPTCHA_MARKERS = (
     "verify you are human",
 )
 
-_DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.3"
-)
-_DEFAULT_HEADERS = {"User-Agent": _DEFAULT_USER_AGENT}
-
-
-def _http_get(url: str, timeout: float = 20.0) -> httpx.Response:
-    return httpx.get(url, timeout=timeout, headers=_DEFAULT_HEADERS)
+_DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br, zstd",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Priority": "u=0, i",
+}
 
 
 class BackoffError(RuntimeError):
@@ -64,7 +69,8 @@ def _classify_backoff_response(response: httpx.Response) -> Optional[str]:
     if response.headers.get("Retry-After") is not None:
         return "retry-after-header"
 
-    body = response.text.lower()
+    body_match = re.search(r"<body\b[^>]*>(.*?)</body>", response.text, flags=re.IGNORECASE | re.DOTALL)
+    body = (body_match.group(1) if body_match else "").lower()
     for marker in _CAPTCHA_MARKERS:
         if marker in body:
             return f"body-marker={marker}"
@@ -134,6 +140,27 @@ def _dedupe_urls(urls: Iterable[str]) -> List[str]:
     return unique_urls
 
 
+def _extract_markdown_links(content_markdown: str) -> List[str]:
+    rendered_html = markdown.markdown(content_markdown)
+    soup = BeautifulSoup(rendered_html, "html.parser")
+    links: List[str] = []
+    for anchor in soup.find_all("a", href=True):
+        href = _canonicalize_url(str(anchor.get("href") or ""))
+        if href:
+            links.append(href)
+    return links
+
+
+def _to_document_ids_from_markdown(*, source_document_id: str, content_markdown: str) -> set[str]:
+    to_document_ids: set[str] = set()
+    for href in _extract_markdown_links(content_markdown):
+        to_document_id = document_id_for_url(_canonicalize_url(href))
+        if to_document_id == source_document_id:
+            continue
+        to_document_ids.add(to_document_id)
+    return to_document_ids
+
+
 def _parse_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
@@ -189,9 +216,15 @@ class SearchService:
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
         self._sqlite_vec = _ensure_sqlite_vec(self.connection)
+        self._http_client = httpx.Client(headers=_DEFAULT_HEADERS)
         self._init_schema()
 
+    def _http_get(self, url: str, timeout: float = 20.0) -> httpx.Response:
+        # Keep a single in-memory cookie jar for non-feed requests during this service run.
+        return self._http_client.get(url, timeout=timeout)
+
     def close(self) -> None:
+        self._http_client.close()
         self.connection.close()
 
     def __enter__(self) -> "SearchService":
@@ -228,6 +261,15 @@ class SearchService:
                 FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
                 UNIQUE (document_id, chunk_index)
             );
+
+            CREATE TABLE IF NOT EXISTS links (
+                from_document_id TEXT NOT NULL,
+                to_document_id TEXT NOT NULL,
+                PRIMARY KEY (from_document_id, to_document_id),
+                FOREIGN KEY (from_document_id) REFERENCES documents(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_links_to_document_id ON links (to_document_id);
 
             CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts
             USING fts5(content_text, content='chunks', content_rowid='id', tokenize='porter');
@@ -358,6 +400,7 @@ class SearchService:
             )
         if content_changed:
             self.connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
+            self.connection.execute("DELETE FROM links WHERE from_document_id = ?", (document_id,))
         self.connection.commit()
         return Document(
             id=document_id,
@@ -422,7 +465,9 @@ class SearchService:
         if not document:
             raise DocumentNotFoundError(f"Document not found: {document_id}")
         self.connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
+        self.connection.execute("DELETE FROM links WHERE from_document_id = ?", (document_id,))
         created = self._create_chunks(document_id, document.content_markdown)
+        self._insert_document_links(document_id=document_id, content_markdown=document.content_markdown)
         self.connection.commit()
         return len(created)
 
@@ -446,6 +491,17 @@ class SearchService:
             total_created += self.chunk_document(row["id"])
         return total_created
 
+    def _insert_document_links(self, *, document_id: str, content_markdown: str) -> None:
+        to_document_ids = _to_document_ids_from_markdown(
+            source_document_id=document_id,
+            content_markdown=content_markdown,
+        )
+        for to_document_id in sorted(to_document_ids):
+            self.connection.execute(
+                "INSERT OR IGNORE INTO links (from_document_id, to_document_id) VALUES (?, ?)",
+                (document_id, to_document_id),
+            )
+
     def _create_chunks(self, document_id: str, content_markdown: str) -> List[Chunk]:
         chunks = chunk_markdown(content_markdown)
         embeddings = embed_texts(chunks, prompt="search_document") if chunks else []
@@ -467,7 +523,7 @@ class SearchService:
         return created
 
     def create_document_from_url(self, url: str) -> Document:
-        response = _http_get(url, timeout=20.0)
+        response = self._http_get(url, timeout=20.0)
         backoff_reason = _classify_backoff_response(response)
         if backoff_reason:
             raise BackoffError(f"Backoff detected while ingesting URL {url}: {backoff_reason}")
@@ -614,7 +670,7 @@ class SearchService:
 
     def create_documents_from_opml(self, opml_url: str, paginate: bool = False) -> List[Document]:
         """Fetch and parse OPML, then ingest documents from each feed URL with best-effort handling."""
-        response = _http_get(opml_url, timeout=20.0)
+        response = self._http_get(opml_url, timeout=20.0)
         response.raise_for_status()
         xml_content = response.text
 
@@ -634,7 +690,7 @@ class SearchService:
 
     def create_documents_from_sitemap(self, sitemap_url: str, bootstrap: bool = False) -> List[Document]:
         """Fetch and parse sitemap XML, then ingest each URL entry with best-effort handling."""
-        response = _http_get(sitemap_url, timeout=20.0)
+        response = self._http_get(sitemap_url, timeout=20.0)
         response.raise_for_status()
         xml_content = response.text
 
@@ -715,15 +771,40 @@ class SearchService:
                 SELECT chunk_id FROM fts_ranked
                 UNION
                 SELECT chunk_id FROM vec_ranked
+            ),
+            candidate_documents AS (
+                SELECT DISTINCT chunks.document_id
+                FROM all_chunk_ids
+                JOIN chunks ON chunks.id = all_chunk_ids.chunk_id
+            ),
+            candidate_inbound_links AS (
+                SELECT
+                    candidate_documents.document_id,
+                    COUNT(links.from_document_id) AS inbound_count
+                FROM candidate_documents
+                LEFT JOIN links ON links.to_document_id = candidate_documents.document_id
+                GROUP BY candidate_documents.document_id
+            ),
+            link_ranked AS (
+                SELECT
+                    document_id,
+                    1.0 / (1 + row_number() OVER (ORDER BY inbound_count DESC, document_id ASC)) AS link_score
+                FROM candidate_inbound_links
+                WHERE inbound_count > 0
             )
             SELECT
                 all_chunk_ids.chunk_id,
                 COALESCE(fts_ranked.fts_score, 0.0) AS fts_score,
                 COALESCE(vec_ranked.vector_score, 0.0) AS vector_score,
-                COALESCE(fts_ranked.fts_score, 0.0) + COALESCE(vec_ranked.vector_score, 0.0) AS final_score
+                COALESCE(link_ranked.link_score, 0.0) AS link_score,
+                COALESCE(fts_ranked.fts_score, 0.0)
+                    + COALESCE(vec_ranked.vector_score, 0.0)
+                    + COALESCE(link_ranked.link_score, 0.0) AS final_score
             FROM all_chunk_ids
+            JOIN chunks ON chunks.id = all_chunk_ids.chunk_id
             LEFT JOIN fts_ranked ON fts_ranked.chunk_id = all_chunk_ids.chunk_id
             LEFT JOIN vec_ranked ON vec_ranked.chunk_id = all_chunk_ids.chunk_id
+            LEFT JOIN link_ranked ON link_ranked.document_id = chunks.document_id
             ORDER BY final_score DESC, all_chunk_ids.chunk_id ASC
             LIMIT ?
             """,
@@ -746,6 +827,7 @@ class SearchService:
             scores[chunk_id] = SearchScores(
                 fts=row["fts_score"],
                 vector=row["vector_score"],
+                link=row["link_score"],
                 hybrid=row["final_score"],
             )
 
@@ -799,6 +881,7 @@ class SearchService:
                     score=score.hybrid,
                     fts_score=score.fts,
                     vector_score=score.vector,
+                    link_score=score.link,
                 )
             )
 

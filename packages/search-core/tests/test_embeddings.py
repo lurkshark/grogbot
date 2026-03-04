@@ -48,3 +48,25 @@ def test_embed_texts_calls_model_and_returns_lists(monkeypatch):
 
     assert result == [[1.0, 2.0], [3.0, 4.0]]
     assert fake_model.calls == [(["first", "second"], True, "search_query")]
+
+
+def test_embed_texts_batches_requests_to_max_eight(monkeypatch):
+    class FakeModel:
+        def __init__(self):
+            self.calls = []
+
+        def encode(self, texts, *, normalize_embeddings: bool, prompt: str):
+            self.calls.append((list(texts), normalize_embeddings, prompt))
+            return [_FakeArray([float(int(text.removeprefix("chunk-")))]) for text in texts]
+
+    fake_model = FakeModel()
+    monkeypatch.setattr(embeddings, "_load_model", lambda: fake_model)
+
+    inputs = [f"chunk-{index}" for index in range(10)]
+    result = embeddings.embed_texts(inputs, prompt="search_document")
+
+    assert result == [[float(index)] for index in range(10)]
+    assert fake_model.calls == [
+        ([f"chunk-{index}" for index in range(8)], True, "search_document"),
+        (["chunk-8", "chunk-9"], True, "search_document"),
+    ]

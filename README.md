@@ -1,10 +1,10 @@
 # Grogbot
 
-Grogbot is a uv-based Python monorepo for multiple systems. The first system, **search**, provides local storage and rank-fused search over markdown documents, exposed through both a CLI and a FastAPI service.
+Grogbot is a uv-based Python monorepo for multiple systems. The first system, **search**, provides local storage and rank-fused search over markdown documents using FTS, vector, and link authority signals, exposed through both a CLI and a FastAPI service.
 
 ## Packages
 
-- **`grogbot-search-core`** (`packages/search-core`): Core models, SQLite persistence, ingestion, chunking, embeddings, and rank-fused search.
+- **`grogbot-search-core`** (`packages/search-core`): Core models, SQLite persistence, ingestion, chunking, embeddings, document-link graph storage, and three-signal rank-fused search.
 - **`grogbot-cli`** (`packages/cli`): Typer-powered CLI (`grogbot`) that surfaces search functionality.
 - **`grogbot-api`** (`packages/api`): FastAPI app exposing the search system over HTTP.
 

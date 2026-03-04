@@ -618,7 +618,7 @@ def test_create_document_from_url_raises_on_backoff_signals(service: SearchServi
         ("backoff-429", "status_code=429"),
         ("backoff-503", "status_code=503"),
         ("backoff-retry-after", "retry-after-header"),
-        ("backoff-captcha", "body-marker=captcha"),
+        ("backoff-captcha", "body-marker=recaptcha"),
     ],
 )
 def test_create_document_from_url_backoff_error_includes_reason(
@@ -682,6 +682,23 @@ def test_create_documents_from_feed_pagination_enabled(service: SearchService, h
     urls = {doc.canonical_url for doc in documents}
     assert f"{http_server}/feed-paginated-entry-1" in urls
     assert f"{http_server}/feed-paginated-entry-2" in urls
+
+
+def test_create_documents_from_feed_pagination_applies_minimum_one_second_interval(
+    service: SearchService,
+    http_server,
+    monkeypatch,
+):
+    monotonic_values = iter([0.0, 0.2, 1.0, 1.8])
+    sleep_calls: list[float] = []
+
+    monkeypatch.setattr(service_module.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(service_module.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    documents = service.create_documents_from_feed(f"{http_server}/feed-paginated", paginate=True)
+
+    assert len(documents) == 2
+    assert sleep_calls == pytest.approx([0.8, 0.2])
 
 
 def test_create_documents_from_feed_wordpress_pagination(service: SearchService, http_server):

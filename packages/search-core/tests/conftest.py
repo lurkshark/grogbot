@@ -391,7 +391,7 @@ def http_server():
         "body": """
         <html>
           <head><title>Attention Required</title></head>
-          <body>Please verify you are human (captcha challenge)</body>
+          <body>Please verify you are human (reCAPTCHA challenge)</body>
         </html>
         """,
     }

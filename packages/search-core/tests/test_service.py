@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from urllib.parse import urlparse
 
+import httpx
 import pysqlite3 as sqlite3
 import pytest
 
@@ -335,6 +336,47 @@ def test_search_returns_empty_for_blank_query_or_non_positive_limit(service: Sea
 
 # Ingestion behavior implemented in service.py
 
+def test_non_feed_http_get_uses_configured_browser_headers(service: SearchService):
+    captured: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["request"] = request
+        return httpx.Response(200, text="ok")
+
+    service._http_client.close()
+    service._http_client = httpx.Client(
+        transport=httpx.MockTransport(handler),
+        headers=service_module._DEFAULT_HEADERS,
+    )
+
+    service._http_get("https://example.com/header-check")
+
+    request = captured["request"]
+    for header_name, expected_value in service_module._DEFAULT_HEADERS.items():
+        assert request.headers.get(header_name) == expected_value
+
+
+def test_non_feed_http_get_maintains_cookies_for_service_run(service: SearchService):
+    seen_cookie_headers: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_cookie_headers.append(request.headers.get("cookie"))
+        if request.url.path == "/set-cookie":
+            return httpx.Response(200, headers={"Set-Cookie": "sessionid=abc123; Path=/"}, text="set")
+        return httpx.Response(200, text="ok")
+
+    service._http_client.close()
+    service._http_client = httpx.Client(
+        transport=httpx.MockTransport(handler),
+        headers=service_module._DEFAULT_HEADERS,
+    )
+
+    service._http_get("https://example.com/set-cookie")
+    service._http_get("https://example.com/follow-up")
+
+    assert seen_cookie_headers == [None, "sessionid=abc123"]
+
+
 def test_create_document_from_url(service: SearchService, http_server):
     document = service.create_document_from_url(f"{http_server}/article")
 
@@ -607,6 +649,20 @@ def test_document_has_chunks_reflects_chunk_lifecycle(service: SearchService):
 def test_parse_datetime_returns_none_for_invalid_values():
     assert service_module._parse_datetime(None) is None
     assert service_module._parse_datetime("not a date") is None
+
+
+def test_classify_backoff_response_checks_captcha_markers_only_in_html_body():
+    head_only = httpx.Response(
+        200,
+        text="<html><head><title>captcha challenge</title></head><body>all clear</body></html>",
+    )
+    assert service_module._classify_backoff_response(head_only) is None
+
+    body_marker = httpx.Response(
+        200,
+        text="<html><head><title>ok</title></head><body>Please verify you are human</body></html>",
+    )
+    assert service_module._classify_backoff_response(body_marker) == "body-marker=verify you are human"
 
 
 def test_search_returns_empty_when_ranked_chunk_rows_are_missing(service: SearchService):

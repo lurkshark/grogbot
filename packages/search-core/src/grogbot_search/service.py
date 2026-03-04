@@ -38,15 +38,18 @@ _CAPTCHA_MARKERS = (
     "verify you are human",
 )
 
-_DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.3"
-)
-_DEFAULT_HEADERS = {"User-Agent": _DEFAULT_USER_AGENT}
-
-
-def _http_get(url: str, timeout: float = 20.0) -> httpx.Response:
-    return httpx.get(url, timeout=timeout, headers=_DEFAULT_HEADERS)
+_DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br, zstd",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Priority": "u=0, i",
+}
 
 
 class BackoffError(RuntimeError):
@@ -64,7 +67,8 @@ def _classify_backoff_response(response: httpx.Response) -> Optional[str]:
     if response.headers.get("Retry-After") is not None:
         return "retry-after-header"
 
-    body = response.text.lower()
+    body_match = re.search(r"<body\b[^>]*>(.*?)</body>", response.text, flags=re.IGNORECASE | re.DOTALL)
+    body = (body_match.group(1) if body_match else "").lower()
     for marker in _CAPTCHA_MARKERS:
         if marker in body:
             return f"body-marker={marker}"
@@ -189,9 +193,15 @@ class SearchService:
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
         self._sqlite_vec = _ensure_sqlite_vec(self.connection)
+        self._http_client = httpx.Client(headers=_DEFAULT_HEADERS)
         self._init_schema()
 
+    def _http_get(self, url: str, timeout: float = 20.0) -> httpx.Response:
+        # Keep a single in-memory cookie jar for non-feed requests during this service run.
+        return self._http_client.get(url, timeout=timeout)
+
     def close(self) -> None:
+        self._http_client.close()
         self.connection.close()
 
     def __enter__(self) -> "SearchService":
@@ -467,7 +477,7 @@ class SearchService:
         return created
 
     def create_document_from_url(self, url: str) -> Document:
-        response = _http_get(url, timeout=20.0)
+        response = self._http_get(url, timeout=20.0)
         backoff_reason = _classify_backoff_response(response)
         if backoff_reason:
             raise BackoffError(f"Backoff detected while ingesting URL {url}: {backoff_reason}")
@@ -614,7 +624,7 @@ class SearchService:
 
     def create_documents_from_opml(self, opml_url: str, paginate: bool = False) -> List[Document]:
         """Fetch and parse OPML, then ingest documents from each feed URL with best-effort handling."""
-        response = _http_get(opml_url, timeout=20.0)
+        response = self._http_get(opml_url, timeout=20.0)
         response.raise_for_status()
         xml_content = response.text
 
@@ -634,7 +644,7 @@ class SearchService:
 
     def create_documents_from_sitemap(self, sitemap_url: str, bootstrap: bool = False) -> List[Document]:
         """Fetch and parse sitemap XML, then ingest each URL entry with best-effort handling."""
-        response = _http_get(sitemap_url, timeout=20.0)
+        response = self._http_get(sitemap_url, timeout=20.0)
         response.raise_for_status()
         xml_content = response.text
 

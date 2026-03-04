@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import math
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict
@@ -11,10 +14,24 @@ from grogbot_search.service import SearchService
 
 @pytest.fixture()
 def service(tmp_path, monkeypatch):
-    def fake_embed(texts, *, prompt):
-        return [[0.0] * 768 for _ in texts]
+    def fake_embed(texts, *, prompt):  # noqa: ARG001 - mirror real signature
+        embeddings: list[list[float]] = []
+        for text in texts:
+            vector = [0.0] * 768
+            tokens = re.findall(r"[a-z0-9]+", text.lower())
+            for token in tokens:
+                digest = hashlib.sha256(token.encode("utf-8")).digest()
+                index = int.from_bytes(digest[:2], "big") % 768
+                sign = 1.0 if digest[2] % 2 == 0 else -1.0
+                vector[index] += sign
+            norm = math.sqrt(sum(value * value for value in vector))
+            if norm > 0:
+                vector = [value / norm for value in vector]
+            embeddings.append(vector)
+        return embeddings
 
     monkeypatch.setattr("grogbot_search.service.embed_texts", fake_embed)
+    monkeypatch.setattr("grogbot_search.service.time.sleep", lambda _seconds: None)
     db_path = tmp_path / "search.db"
     svc = SearchService(db_path)
     yield svc
@@ -92,6 +109,36 @@ def http_server():
         <article>
           <h1>Second Article Heading</h1>
           <p>Hello world from second article content.</p>
+        </article>
+      </body>
+    </html>
+    """
+
+    responses["/article-no-canonical"] = """
+    <html>
+      <head>
+        <title>No Canonical Tag</title>
+      </head>
+      <body>
+        <article>
+          <h1>No Canonical Heading</h1>
+          <p>Uses requested URL as canonical fallback.</p>
+        </article>
+      </body>
+    </html>
+    """
+
+    responses["/article-published"] = f"""
+    <html>
+      <head>
+        <title>Published Article</title>
+        <link rel="canonical" href="{base_url}/canonical-published" />
+        <meta property="article:published_time" content="2025-01-09T14:30:00Z" />
+      </head>
+      <body>
+        <article>
+          <h1>Published Heading</h1>
+          <p>Article with metadata timestamp.</p>
         </article>
       </body>
     </html>
@@ -229,6 +276,26 @@ def http_server():
 
     responses["/invalid-feed"] = "NOT VALID XML"
 
+    responses["/feed-summary-and-empty"] = f"""
+    <rss version="2.0">
+      <channel>
+        <title>Summary Feed</title>
+        <item>
+          <title>Summary Entry</title>
+          <link>{base_url}/summary-entry</link>
+          <guid>{base_url}/summary-entry</guid>
+          <description><![CDATA[<p>Summary based content.</p>]]></description>
+          <pubDate>Tue, 09 Jan 2025 12:00:00 GMT</pubDate>
+        </item>
+        <item>
+          <title>Empty Entry</title>
+          <link>{base_url}/empty-entry</link>
+          <guid>{base_url}/empty-entry</guid>
+        </item>
+      </channel>
+    </rss>
+    """
+
     responses["/opml"] = f"""<?xml version="1.0" encoding="UTF-8"?>
     <opml version="2.0">
       <head>
@@ -270,6 +337,8 @@ def http_server():
     </opml>
     """
 
+    responses["/invalid-opml"] = "<opml><body><outline"
+
     responses["/sitemap.xml"] = f"""<?xml version="1.0" encoding="UTF-8"?>
     <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
       <url>
@@ -288,6 +357,15 @@ def http_server():
     <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
       <url><loc>{base_url}/article</loc></url>
       <url><loc>{base_url}/article</loc></url>
+    </urlset>
+    """
+
+    responses["/invalid-sitemap.xml"] = "<urlset><url><loc>"
+
+    responses["/sitemap-bootstrap-skip.xml"] = f"""<?xml version="1.0" encoding="UTF-8"?>
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url><loc>{base_url}/backoff-403</loc></url>
+      <url><loc>{base_url}/article-2</loc></url>
     </urlset>
     """
 

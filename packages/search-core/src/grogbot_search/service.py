@@ -34,23 +34,18 @@ class SearchScores:
 
 _BACKOFF_STATUS_CODES = {401, 403, 429, 503}
 _CAPTCHA_MARKERS = (
-    "captcha",
     "cf-chl",
+    "recaptcha",
     "attention required",
     "verify you are human",
 )
 
 _DEFAULT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0",
+    "User-Agent": "Mozilla/5.0 (compatible; Grogbot/1.0; +https://www.hauntedspice.com)",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br, zstd",
-    "Connection": "keep-alive",
+    "Accept-Encoding": "gzip, deflate",
     "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Priority": "u=0, i",
 }
 
 

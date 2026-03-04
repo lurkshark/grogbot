@@ -238,7 +238,7 @@ def test_synchronize_document_chunks_non_positive_maximum_is_noop(service: Searc
 
 # Link graph behavior
 
-def test_chunk_document_stores_unique_outbound_links_per_target(service: SearchService):
+def test_chunk_document_skips_same_domain_links_and_dedupes_cross_domain_targets(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
     document = service.upsert_document(
         source_id=source.id,
@@ -246,9 +246,10 @@ def test_chunk_document_stores_unique_outbound_links_per_target(service: SearchS
         title="Source",
         published_at=None,
         content_markdown=(
-            "[one](https://example.com/target) "
-            "[two](https://example.com/target) "
-            "[three](https://example.com/other-target)"
+            "[same](https://example.com/target) "
+            "[cross-one](https://other.example/target) "
+            "[cross-one-duplicate](https://other.example/target) "
+            "[cross-two](https://third.example/other-target)"
         ),
     )
 
@@ -267,15 +268,41 @@ def test_chunk_document_stores_unique_outbound_links_per_target(service: SearchS
     assert len(links) == 2
     assert [row["to_document_id"] for row in links] == sorted(
         [
-            service_module.document_id_for_url(service_module._canonicalize_url("https://example.com/target")),
-            service_module.document_id_for_url(service_module._canonicalize_url("https://example.com/other-target")),
+            service_module.document_id_for_url(service_module._canonicalize_url("https://other.example/target")),
+            service_module.document_id_for_url(service_module._canonicalize_url("https://third.example/other-target")),
         ]
     )
 
 
+def test_chunk_document_resolves_relative_links_before_domain_filtering(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    document = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/posts/entry",
+        title="Entry",
+        published_at=None,
+        content_markdown=(
+            "[root](/about) "
+            "[parent](../archive) "
+            "[cross](https://external.example/outbound)"
+        ),
+    )
+
+    service.chunk_document(document.id)
+
+    links = service.connection.execute(
+        "SELECT to_document_id FROM links WHERE from_document_id = ? ORDER BY to_document_id",
+        (document.id,),
+    ).fetchall()
+
+    assert [row["to_document_id"] for row in links] == [
+        service_module.document_id_for_url(service_module._canonicalize_url("https://external.example/outbound"))
+    ]
+
+
 def test_chunk_document_stores_unknown_targets_by_canonicalized_url(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
-    target_url = "https://example.com/not-ingested"
+    target_url = "https://external.site/not-ingested"
     document = service.upsert_document(
         source_id=source.id,
         canonical_url="https://example.com/source",
@@ -305,7 +332,7 @@ def test_outbound_links_ignore_self_and_follow_content_delete_and_refresh_lifecy
         canonical_url=canonical_url,
         title="Lifecycle",
         published_at=None,
-        content_markdown=f"[self]({canonical_url}) [other](https://example.com/other)",
+        content_markdown=f"[self]({canonical_url}) [other](https://other.example/other)",
     )
 
     service.chunk_document(document.id)
@@ -315,7 +342,7 @@ def test_outbound_links_ignore_self_and_follow_content_delete_and_refresh_lifecy
         (document.id,),
     ).fetchall()
     assert [row["to_document_id"] for row in links] == [
-        service_module.document_id_for_url(service_module._canonicalize_url("https://example.com/other"))
+        service_module.document_id_for_url(service_module._canonicalize_url("https://other.example/other"))
     ]
 
     updated = service.upsert_document(
@@ -334,7 +361,7 @@ def test_outbound_links_ignore_self_and_follow_content_delete_and_refresh_lifecy
 
     service.connection.execute(
         "UPDATE documents SET content_markdown = ? WHERE id = ?",
-        ("[refreshed](https://example.com/refreshed)", updated.id),
+        ("[refreshed](https://external.example/refreshed)", updated.id),
     )
     service.connection.commit()
     service.chunk_document(updated.id)
@@ -344,7 +371,7 @@ def test_outbound_links_ignore_self_and_follow_content_delete_and_refresh_lifecy
         (updated.id,),
     ).fetchall()
     assert [row["to_document_id"] for row in refreshed_links] == [
-        service_module.document_id_for_url(service_module._canonicalize_url("https://example.com/refreshed"))
+        service_module.document_id_for_url(service_module._canonicalize_url("https://external.example/refreshed"))
     ]
 
     assert service.delete_document(updated.id) is True
@@ -456,32 +483,35 @@ def test_search_returns_empty_for_blank_query_or_non_positive_limit(service: Sea
 
 
 def test_search_includes_link_score_with_deterministic_ties_and_zero_fill(service: SearchService):
-    source = service.upsert_source("example.com", name="Example")
+    source_a = service.upsert_source("alpha.example", name="Alpha")
+    source_b = service.upsert_source("beta.example", name="Beta")
+    source_c = service.upsert_source("gamma.example", name="Gamma")
+    source_d = service.upsert_source("delta.example", name="Delta")
 
     doc_a = service.upsert_document(
-        source_id=source.id,
-        canonical_url="https://example.com/a",
+        source_id=source_a.id,
+        canonical_url="https://alpha.example/a",
         title="A",
         published_at=None,
         content_markdown="alpha",
     )
     doc_b = service.upsert_document(
-        source_id=source.id,
-        canonical_url="https://example.com/b",
+        source_id=source_b.id,
+        canonical_url="https://beta.example/b",
         title="B",
         published_at=None,
         content_markdown=f"alpha [a]({doc_a.canonical_url})",
     )
     doc_c = service.upsert_document(
-        source_id=source.id,
-        canonical_url="https://example.com/c",
+        source_id=source_c.id,
+        canonical_url="https://gamma.example/c",
         title="C",
         published_at=None,
         content_markdown=f"alpha [a]({doc_a.canonical_url})",
     )
     doc_d = service.upsert_document(
-        source_id=source.id,
-        canonical_url="https://example.com/d",
+        source_id=source_d.id,
+        canonical_url="https://delta.example/d",
         title="D",
         published_at=None,
         content_markdown=f"alpha [b]({doc_b.canonical_url}) [c]({doc_c.canonical_url})",
@@ -618,7 +648,7 @@ def test_create_document_from_url_raises_on_backoff_signals(service: SearchServi
         ("backoff-429", "status_code=429"),
         ("backoff-503", "status_code=503"),
         ("backoff-retry-after", "retry-after-header"),
-        ("backoff-captcha", "body-marker=captcha"),
+        ("backoff-captcha", "body-marker=recaptcha"),
     ],
 )
 def test_create_document_from_url_backoff_error_includes_reason(
@@ -682,6 +712,23 @@ def test_create_documents_from_feed_pagination_enabled(service: SearchService, h
     urls = {doc.canonical_url for doc in documents}
     assert f"{http_server}/feed-paginated-entry-1" in urls
     assert f"{http_server}/feed-paginated-entry-2" in urls
+
+
+def test_create_documents_from_feed_pagination_applies_minimum_one_second_interval(
+    service: SearchService,
+    http_server,
+    monkeypatch,
+):
+    monotonic_values = iter([0.0, 0.2, 1.0, 1.8])
+    sleep_calls: list[float] = []
+
+    monkeypatch.setattr(service_module.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(service_module.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    documents = service.create_documents_from_feed(f"{http_server}/feed-paginated", paginate=True)
+
+    assert len(documents) == 2
+    assert sleep_calls == pytest.approx([0.8, 0.2])
 
 
 def test_create_documents_from_feed_wordpress_pagination(service: SearchService, http_server):

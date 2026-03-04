@@ -34,23 +34,18 @@ class SearchScores:
 
 _BACKOFF_STATUS_CODES = {401, 403, 429, 503}
 _CAPTCHA_MARKERS = (
-    "captcha",
     "cf-chl",
+    "recaptcha",
     "attention required",
     "verify you are human",
 )
 
 _DEFAULT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0",
+    "User-Agent": "Mozilla/5.0 (compatible; Grogbot/1.0; +https://www.hauntedspice.com)",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br, zstd",
-    "Connection": "keep-alive",
+    "Accept-Encoding": "gzip, deflate",
     "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Priority": "u=0, i",
 }
 
 
@@ -151,10 +146,21 @@ def _extract_markdown_links(content_markdown: str) -> List[str]:
     return links
 
 
-def _to_document_ids_from_markdown(*, source_document_id: str, content_markdown: str) -> set[str]:
+def _to_document_ids_from_markdown(
+    *,
+    source_document_id: str,
+    source_canonical_url: str,
+    content_markdown: str,
+) -> set[str]:
     to_document_ids: set[str] = set()
+    source_domain = _normalize_domain(_canonicalize_url(source_canonical_url))
     for href in _extract_markdown_links(content_markdown):
-        to_document_id = document_id_for_url(_canonicalize_url(href))
+        resolved_url = _canonicalize_url(urljoin(source_canonical_url, href))
+        if not resolved_url:
+            continue
+        if _normalize_domain(resolved_url) == source_domain:
+            continue
+        to_document_id = document_id_for_url(_canonicalize_url(resolved_url))
         if to_document_id == source_document_id:
             continue
         to_document_ids.add(to_document_id)
@@ -467,7 +473,11 @@ class SearchService:
         self.connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
         self.connection.execute("DELETE FROM links WHERE from_document_id = ?", (document_id,))
         created = self._create_chunks(document_id, document.content_markdown)
-        self._insert_document_links(document_id=document_id, content_markdown=document.content_markdown)
+        self._insert_document_links(
+            document_id=document_id,
+            source_canonical_url=document.canonical_url,
+            content_markdown=document.content_markdown,
+        )
         self.connection.commit()
         return len(created)
 
@@ -491,9 +501,10 @@ class SearchService:
             total_created += self.chunk_document(row["id"])
         return total_created
 
-    def _insert_document_links(self, *, document_id: str, content_markdown: str) -> None:
+    def _insert_document_links(self, *, document_id: str, source_canonical_url: str, content_markdown: str) -> None:
         to_document_ids = _to_document_ids_from_markdown(
             source_document_id=document_id,
+            source_canonical_url=source_canonical_url,
             content_markdown=content_markdown,
         )
         for to_document_id in sorted(to_document_ids):
@@ -595,76 +606,83 @@ class SearchService:
             seen_feed_urls.add(normalized_url)
             pages_processed += 1
 
+            start_time = time.monotonic() if paginate else None
             try:
-                feed = feedparser.parse(current_url)
-            except Exception:
-                if pages_processed == 1:
-                    raise
-                break
-
-            if pages_processed > 1:
-                status = getattr(feed, "status", None)
-                if status is not None and status >= 400:
-                    break
-                if getattr(feed, "bozo", 0) and not feed.entries:
+                try:
+                    feed = feedparser.parse(current_url)
+                except Exception:
+                    if pages_processed == 1:
+                        raise
                     break
 
-            page_feed_name = feed.feed.get("title")
-            if page_feed_name:
-                feed_name = feed_name or page_feed_name
+                if pages_processed > 1:
+                    status = getattr(feed, "status", None)
+                    if status is not None and status >= 400:
+                        break
+                    if getattr(feed, "bozo", 0) and not feed.entries:
+                        break
 
-            for entry in feed.entries:
-                entry_url = entry.get("link") or entry.get("id")
-                if not entry_url:
-                    continue
-                canonical_url = _canonicalize_url(entry_url)
-                canonical_domain = _normalize_domain(canonical_url)
-                source = self._get_source_by_domain(canonical_domain)
-                if not source:
-                    source = self.upsert_source(
-                        canonical_domain=canonical_domain,
-                        name=feed_name,
-                        rss_feed=feed_url,
-                    )
-                else:
-                    updated_name = source.name or feed_name
-                    updated_rss_feed = source.rss_feed or feed_url
-                    if updated_name != source.name or updated_rss_feed != source.rss_feed:
+                page_feed_name = feed.feed.get("title")
+                if page_feed_name:
+                    feed_name = feed_name or page_feed_name
+
+                for entry in feed.entries:
+                    entry_url = entry.get("link") or entry.get("id")
+                    if not entry_url:
+                        continue
+                    canonical_url = _canonicalize_url(entry_url)
+                    canonical_domain = _normalize_domain(canonical_url)
+                    source = self._get_source_by_domain(canonical_domain)
+                    if not source:
                         source = self.upsert_source(
                             canonical_domain=canonical_domain,
-                            name=updated_name,
-                            rss_feed=updated_rss_feed,
+                            name=feed_name,
+                            rss_feed=feed_url,
                         )
-                content = None
-                if entry.get("content"):
-                    content = entry.content[0].value
-                content = content or entry.get("summary") or ""
-                content_markdown = html_to_markdown(content)
-                if not content_markdown or not content_markdown.strip():
-                    continue
-                title = entry.get("title")
-                published_at = _parse_datetime(entry.get("published") or entry.get("updated"))
-                documents.append(
-                    self.upsert_document(
-                        source_id=source.id,
-                        canonical_url=canonical_url,
-                        title=title,
-                        published_at=published_at,
-                        content_markdown=content_markdown,
+                    else:
+                        updated_name = source.name or feed_name
+                        updated_rss_feed = source.rss_feed or feed_url
+                        if updated_name != source.name or updated_rss_feed != source.rss_feed:
+                            source = self.upsert_source(
+                                canonical_domain=canonical_domain,
+                                name=updated_name,
+                                rss_feed=updated_rss_feed,
+                            )
+                    content = None
+                    if entry.get("content"):
+                        content = entry.content[0].value
+                    content = content or entry.get("summary") or ""
+                    content_markdown = html_to_markdown(content)
+                    if not content_markdown or not content_markdown.strip():
+                        continue
+                    title = entry.get("title")
+                    published_at = _parse_datetime(entry.get("published") or entry.get("updated"))
+                    documents.append(
+                        self.upsert_document(
+                            source_id=source.id,
+                            canonical_url=canonical_url,
+                            title=title,
+                            published_at=published_at,
+                            content_markdown=content_markdown,
+                        )
                     )
-                )
 
-            if not paginate:
-                break
-            if pages_processed >= 100:
-                break
+                if not paginate:
+                    break
+                if pages_processed >= 100:
+                    break
 
-            next_url = _next_feed_url(feed, current_url)
-            if not next_url and _is_wordpress_feed(feed):
-                next_url = _next_wordpress_url(current_url)
-            if not next_url:
-                break
-            current_url = next_url
+                next_url = _next_feed_url(feed, current_url)
+                if not next_url and _is_wordpress_feed(feed):
+                    next_url = _next_wordpress_url(current_url)
+                if not next_url:
+                    break
+                current_url = next_url
+            finally:
+                if start_time is not None:
+                    elapsed = time.monotonic() - start_time
+                    if elapsed < 1.0:
+                        time.sleep(1.0 - elapsed)
 
         return documents
 

@@ -146,10 +146,21 @@ def _extract_markdown_links(content_markdown: str) -> List[str]:
     return links
 
 
-def _to_document_ids_from_markdown(*, source_document_id: str, content_markdown: str) -> set[str]:
+def _to_document_ids_from_markdown(
+    *,
+    source_document_id: str,
+    source_canonical_url: str,
+    content_markdown: str,
+) -> set[str]:
     to_document_ids: set[str] = set()
+    source_domain = _normalize_domain(_canonicalize_url(source_canonical_url))
     for href in _extract_markdown_links(content_markdown):
-        to_document_id = document_id_for_url(_canonicalize_url(href))
+        resolved_url = _canonicalize_url(urljoin(source_canonical_url, href))
+        if not resolved_url:
+            continue
+        if _normalize_domain(resolved_url) == source_domain:
+            continue
+        to_document_id = document_id_for_url(_canonicalize_url(resolved_url))
         if to_document_id == source_document_id:
             continue
         to_document_ids.add(to_document_id)
@@ -462,7 +473,11 @@ class SearchService:
         self.connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
         self.connection.execute("DELETE FROM links WHERE from_document_id = ?", (document_id,))
         created = self._create_chunks(document_id, document.content_markdown)
-        self._insert_document_links(document_id=document_id, content_markdown=document.content_markdown)
+        self._insert_document_links(
+            document_id=document_id,
+            source_canonical_url=document.canonical_url,
+            content_markdown=document.content_markdown,
+        )
         self.connection.commit()
         return len(created)
 
@@ -486,9 +501,10 @@ class SearchService:
             total_created += self.chunk_document(row["id"])
         return total_created
 
-    def _insert_document_links(self, *, document_id: str, content_markdown: str) -> None:
+    def _insert_document_links(self, *, document_id: str, source_canonical_url: str, content_markdown: str) -> None:
         to_document_ids = _to_document_ids_from_markdown(
             source_document_id=document_id,
+            source_canonical_url=source_canonical_url,
             content_markdown=content_markdown,
         )
         for to_document_id in sorted(to_document_ids):

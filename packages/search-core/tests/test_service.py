@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from grogbot_search.service import SearchService
+from grogbot_search.service import DocumentNotFoundError, SearchService
 
 
 def _chunk_texts(service: SearchService, document_id: str) -> list[str]:
@@ -38,6 +38,7 @@ def test_document_upsert_regenerates_chunks(service: SearchService):
         published_at=None,
         content_markdown="Hello world",
     )
+    service.chunk_document(document.id)
     initial_chunks = _chunk_texts(service, document.id)
 
     updated = service.upsert_document(
@@ -47,6 +48,8 @@ def test_document_upsert_regenerates_chunks(service: SearchService):
         published_at=None,
         content_markdown="Hello world updated content",
     )
+    assert _chunk_texts(service, updated.id) == []
+    service.chunk_document(updated.id)
     updated_chunks = _chunk_texts(service, updated.id)
 
     assert initial_chunks != updated_chunks
@@ -54,13 +57,14 @@ def test_document_upsert_regenerates_chunks(service: SearchService):
 
 def test_rank_fusion_search_returns_results(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
-    service.upsert_document(
+    document = service.upsert_document(
         source_id=source.id,
         canonical_url="https://example.com/hello",
         title="Hello",
         published_at=None,
         content_markdown="Hello world from the search system.",
     )
+    service.chunk_document(document.id)
 
     results = service.search("hello", limit=5)
 
@@ -79,6 +83,7 @@ def test_rank_fusion_scores_are_reciprocal_and_additive(service: SearchService):
             published_at=None,
             content_markdown="alpha alpha",
         )
+    service.synchronize_document_chunks()
 
     results = service.search("alpha", limit=3)
 
@@ -102,6 +107,7 @@ def test_rank_fusion_zero_fills_missing_method_score(service: SearchService):
         published_at=None,
         content_markdown="alpha alpha",
     )
+    service.synchronize_document_chunks()
 
     results = service.search("nonexistentterm", limit=5)
 
@@ -127,13 +133,14 @@ class _RecordingConnection:
 
 def test_search_uses_limit_times_ten_candidate_depth(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
-    service.upsert_document(
+    document = service.upsert_document(
         source_id=source.id,
         canonical_url="https://example.com/alpha",
         title="Alpha",
         published_at=None,
         content_markdown="alpha alpha",
     )
+    service.chunk_document(document.id)
 
     recording_connection = _RecordingConnection(service.connection)
     service.connection = recording_connection
@@ -151,3 +158,75 @@ def test_search_uses_limit_times_ten_candidate_depth(service: SearchService):
     assert params[1] == 40
     assert params[3] == 40
     assert params[4] == 4
+
+
+def test_upsert_document_rejects_empty_content(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+
+    with pytest.raises(ValueError):
+        service.upsert_document(
+            source_id=source.id,
+            canonical_url="https://example.com/empty",
+            title="Empty",
+            published_at=None,
+            content_markdown="   ",
+        )
+
+    doc_count = service.connection.execute("SELECT COUNT(*) AS count FROM documents").fetchone()["count"]
+    assert doc_count == 0
+
+
+def test_chunk_document_returns_count(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    document = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/chunk",
+        title="Chunk",
+        published_at=None,
+        content_markdown="Hello world",
+    )
+
+    created = service.chunk_document(document.id)
+
+    row = service.connection.execute(
+        "SELECT COUNT(*) AS count FROM chunks WHERE document_id = ?",
+        (document.id,),
+    ).fetchone()
+    assert created == row["count"]
+    assert created > 0
+
+
+def test_chunk_document_missing_raises(service: SearchService):
+    with pytest.raises(DocumentNotFoundError):
+        service.chunk_document("missing-id")
+
+
+def test_synchronize_document_chunks_respects_maximum(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/first",
+        title="First",
+        published_at=None,
+        content_markdown="first content",
+    )
+    service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/second",
+        title="Second",
+        published_at=None,
+        content_markdown="second content",
+    )
+
+    created = service.synchronize_document_chunks(maximum=1)
+    chunked_docs = service.connection.execute(
+        "SELECT DISTINCT document_id FROM chunks ORDER BY document_id",
+    ).fetchall()
+    assert len(chunked_docs) == 1
+    assert created == service.connection.execute("SELECT COUNT(*) AS count FROM chunks").fetchone()["count"]
+
+    service.synchronize_document_chunks()
+    chunked_docs = service.connection.execute(
+        "SELECT DISTINCT document_id FROM chunks ORDER BY document_id",
+    ).fetchall()
+    assert len(chunked_docs) == 2

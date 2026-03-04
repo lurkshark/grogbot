@@ -14,7 +14,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python <3.11
 import typer
 from dateutil import parser as date_parser
 
-from grogbot_search import SearchService, load_config
+from grogbot_search import DocumentNotFoundError, SearchService, load_config
 
 app = typer.Typer(no_args_is_help=True)
 search_app = typer.Typer(no_args_is_help=True)
@@ -108,13 +108,17 @@ def document_upsert(
     published_at: Optional[str] = typer.Option(None, "--published-at"),
 ):
     with _service() as service:
-        document = service.upsert_document(
-            source_id=source_id,
-            canonical_url=canonical_url,
-            title=title,
-            published_at=_parse_datetime(published_at),
-            content_markdown=content_markdown,
-        )
+        try:
+            document = service.upsert_document(
+                source_id=source_id,
+                canonical_url=canonical_url,
+                title=title,
+                published_at=_parse_datetime(published_at),
+                content_markdown=content_markdown,
+            )
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
     typer.echo(_dump(document.model_dump()))
 
 
@@ -141,10 +145,37 @@ def document_delete(document_id: str = typer.Argument(..., help="Document ID")):
     typer.echo(_dump({"deleted": deleted}))
 
 
-@search_app.command("ingest-url")
-def ingest_url(url: str = typer.Argument(..., help="URL to ingest")):
+@document_app.command("chunk")
+def document_chunk(document_id: str = typer.Argument(..., help="Document ID")):
     with _service() as service:
-        document = service.create_document_from_url(url)
+        try:
+            count = service.chunk_document(document_id)
+        except DocumentNotFoundError as exc:
+            typer.echo("Document not found", err=True)
+            raise typer.Exit(code=1) from exc
+    typer.echo(_dump({"chunks_created": count}))
+
+
+@document_app.command("chunk-sync")
+def document_chunk_sync(maximum: Optional[int] = typer.Option(None, "--maximum")):
+    with _service() as service:
+        count = service.synchronize_document_chunks(maximum=maximum)
+    typer.echo(_dump({"chunks_created": count}))
+
+
+@search_app.command("ingest-url")
+def ingest_url(
+    url: str = typer.Argument(..., help="URL to ingest"),
+    chunk: bool = typer.Option(False, "--chunk", is_flag=True, help="Immediately chunk ingested documents"),
+):
+    with _service() as service:
+        try:
+            document = service.create_document_from_url(url)
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+        if chunk and not service.document_has_chunks(document.id):
+            service.chunk_document(document.id)
     typer.echo(_dump(document.model_dump()))
 
 
@@ -152,9 +183,14 @@ def ingest_url(url: str = typer.Argument(..., help="URL to ingest")):
 def ingest_feed(
     feed_url: str = typer.Argument(..., help="Feed URL to ingest"),
     paginate: bool = typer.Option(False, "--paginate", help="Follow rel=next pagination"),
+    chunk: bool = typer.Option(False, "--chunk", is_flag=True, help="Immediately chunk ingested documents"),
 ):
     with _service() as service:
         documents = service.create_documents_from_feed(feed_url, paginate=paginate)
+        if chunk:
+            for document in documents:
+                if not service.document_has_chunks(document.id):
+                    service.chunk_document(document.id)
     typer.echo(_dump([doc.model_dump() for doc in documents]))
 
 
@@ -162,16 +198,28 @@ def ingest_feed(
 def ingest_opml(
     opml_url: str = typer.Argument(..., help="OPML URL to ingest"),
     paginate: bool = typer.Option(False, "--paginate", help="Follow rel=next pagination for feeds"),
+    chunk: bool = typer.Option(False, "--chunk", is_flag=True, help="Immediately chunk ingested documents"),
 ):
     with _service() as service:
         documents = service.create_documents_from_opml(opml_url, paginate=paginate)
+        if chunk:
+            for document in documents:
+                if not service.document_has_chunks(document.id):
+                    service.chunk_document(document.id)
     typer.echo(_dump([doc.model_dump() for doc in documents]))
 
 
 @search_app.command("ingest-sitemap")
-def ingest_sitemap(sitemap_url: str = typer.Argument(..., help="Sitemap URL to ingest")):
+def ingest_sitemap(
+    sitemap_url: str = typer.Argument(..., help="Sitemap URL to ingest"),
+    chunk: bool = typer.Option(False, "--chunk", is_flag=True, help="Immediately chunk ingested documents"),
+):
     with _service() as service:
         documents = service.create_documents_from_sitemap(sitemap_url)
+        if chunk:
+            for document in documents:
+                if not service.document_has_chunks(document.id):
+                    service.chunk_document(document.id)
     typer.echo(_dump([doc.model_dump() for doc in documents]))
 
 

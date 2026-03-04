@@ -14,15 +14,76 @@ def api_client(service: SearchService):
     from grogbot_api.app import app, get_service
 
     def override_get_service():
+        svc = SearchService(service.db_path)
         try:
-            yield service
+            yield svc
         finally:
-            pass
+            svc.close()
 
     app.dependency_overrides[get_service] = override_get_service
     client = TestClient(app)
     yield client
     app.dependency_overrides.clear()
+
+
+def test_api_chunk_document_endpoint_creates_chunks(api_client, service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    document = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/chunk",
+        title="Chunk",
+        published_at=None,
+        content_markdown="Chunk me",
+    )
+
+    response = api_client.post("/search/documents/chunk", json={"document_id": document.id})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["chunks_created"] > 0
+
+
+def test_api_chunk_document_missing_returns_404(api_client):
+    response = api_client.post("/search/documents/chunk", json={"document_id": "missing"})
+
+    assert response.status_code == 404
+
+
+def test_api_chunk_documents_sync_endpoint(api_client, service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/one",
+        title="One",
+        published_at=None,
+        content_markdown="One",
+    )
+    service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/two",
+        title="Two",
+        published_at=None,
+        content_markdown="Two",
+    )
+
+    response = api_client.post("/search/documents/chunk/sync", json={"maximum": 1})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["chunks_created"] > 0
+
+
+def test_api_document_upsert_rejects_empty_content(api_client):
+    response = api_client.post(
+        "/search/documents",
+        json={
+            "source_id": "source",
+            "canonical_url": "https://example.com/empty",
+            "content_markdown": "   ",
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_api_ingest_opml_endpoint_exists(api_client):
@@ -158,6 +219,71 @@ def test_cli_ingest_opml_output_matches_feed_ingest(service: SearchService, http
     assert isinstance(opml_data, list)
     if feed_data and opml_data:
         assert set(feed_data[0].keys()) == set(opml_data[0].keys())
+
+
+def test_cli_document_chunk_command(service: SearchService):
+    from typer.testing import CliRunner
+    from grogbot_cli.app import app as cli_app
+    from grogbot_search import load_config
+    import json
+
+    source = service.upsert_source("example.com", name="Example")
+    document = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/chunk",
+        title="Chunk",
+        published_at=None,
+        content_markdown="Chunk content",
+    )
+
+    runner = CliRunner()
+    config = load_config()
+    config.db_path = service.db_path
+
+    with patch("grogbot_cli.app.load_config", return_value=config):
+        result = runner.invoke(cli_app, ["search", "document", "chunk", document.id])
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["chunks_created"] > 0
+
+
+def test_cli_document_chunk_sync_command(service: SearchService):
+    from typer.testing import CliRunner
+    from grogbot_cli.app import app as cli_app
+    from grogbot_search import load_config
+    import json
+
+    source = service.upsert_source("example.com", name="Example")
+    service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/one",
+        title="One",
+        published_at=None,
+        content_markdown="One",
+    )
+    service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/two",
+        title="Two",
+        published_at=None,
+        content_markdown="Two",
+    )
+
+    runner = CliRunner()
+    config = load_config()
+    config.db_path = service.db_path
+
+    with patch("grogbot_cli.app.load_config", return_value=config):
+        result = runner.invoke(cli_app, ["search", "document", "chunk-sync", "--maximum", "1"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["chunks_created"] > 0
+    chunked = service.connection.execute(
+        "SELECT COUNT(DISTINCT document_id) AS count FROM chunks",
+    ).fetchone()["count"]
+    assert chunked == 1
 
 
 def test_opml_request_model_validation(api_client):
@@ -303,13 +429,14 @@ def test_cli_query_includes_full_content_by_default(service: SearchService):
     import json
 
     source = service.upsert_source("example.com", name="Example")
-    service.upsert_document(
+    document = service.upsert_document(
         source_id=source.id,
         canonical_url="https://example.com/full",
         title="Full",
         published_at=None,
         content_markdown="hello world full content",
     )
+    service.chunk_document(document.id)
 
     runner = CliRunner()
     config = load_config()
@@ -333,13 +460,14 @@ def test_cli_query_summary_omits_large_content_fields(service: SearchService):
     import json
 
     source = service.upsert_source("example.com", name="Example")
-    service.upsert_document(
+    document = service.upsert_document(
         source_id=source.id,
         canonical_url="https://example.com/summary",
         title="Summary",
         published_at=None,
         content_markdown="hello world summary content",
     )
+    service.chunk_document(document.id)
 
     runner = CliRunner()
     config = load_config()

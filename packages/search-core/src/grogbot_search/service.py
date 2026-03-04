@@ -53,6 +53,10 @@ class BackoffError(RuntimeError):
     """Raised when URL ingestion encounters a backoff or anti-bot signal."""
 
 
+class DocumentNotFoundError(RuntimeError):
+    """Raised when a document id is not found for chunking operations."""
+
+
 def _classify_backoff_response(response: httpx.Response) -> Optional[str]:
     if response.status_code in _BACKOFF_STATUS_CODES:
         return f"status_code={response.status_code}"
@@ -311,6 +315,8 @@ class SearchService:
         published_at: Optional[datetime],
         content_markdown: str,
     ) -> Document:
+        if not content_markdown or not content_markdown.strip():
+            raise ValueError("content_markdown cannot be empty")
         canonical_url = _canonicalize_url(canonical_url)
         row = self.connection.execute(
             "SELECT id, content_markdown FROM documents WHERE canonical_url = ?",
@@ -352,7 +358,6 @@ class SearchService:
             )
         if content_changed:
             self.connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
-            self._create_chunks(document_id, content_markdown)
         self.connection.commit()
         return Document(
             id=document_id,
@@ -400,10 +405,46 @@ class SearchService:
             documents.append(Document(**data))
         return documents
 
+    def document_has_chunks(self, document_id: str) -> bool:
+        row = self.connection.execute(
+            "SELECT 1 FROM chunks WHERE document_id = ? LIMIT 1",
+            (document_id,),
+        ).fetchone()
+        return row is not None
+
     def delete_document(self, document_id: str) -> bool:
         cursor = self.connection.execute("DELETE FROM documents WHERE id = ?", (document_id,))
         self.connection.commit()
         return cursor.rowcount > 0
+
+    def chunk_document(self, document_id: str) -> int:
+        document = self.get_document(document_id)
+        if not document:
+            raise DocumentNotFoundError(f"Document not found: {document_id}")
+        self.connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
+        created = self._create_chunks(document_id, document.content_markdown)
+        self.connection.commit()
+        return len(created)
+
+    def synchronize_document_chunks(self, maximum: Optional[int] = None) -> int:
+        if maximum is not None and maximum <= 0:
+            return 0
+        query = (
+            "SELECT documents.id "
+            "FROM documents "
+            "LEFT JOIN chunks ON chunks.document_id = documents.id "
+            "WHERE chunks.id IS NULL "
+            "ORDER BY documents.id"
+        )
+        params: tuple = ()
+        if maximum is not None:
+            query = f"{query} LIMIT ?"
+            params = (maximum,)
+        rows = self.connection.execute(query, params).fetchall()
+        total_created = 0
+        for row in rows:
+            total_created += self.chunk_document(row["id"])
+        return total_created
 
     def _create_chunks(self, document_id: str, content_markdown: str) -> List[Chunk]:
         chunks = chunk_markdown(content_markdown)
@@ -440,6 +481,8 @@ class SearchService:
         readable = ReadabilityDocument(html)
         content_html = readable.summary()
         content_markdown = html_to_markdown(content_html)
+        if not content_markdown or not content_markdown.strip():
+            raise ValueError(f"Empty content for URL {canonical_url}")
         title = readable.short_title() or None
         published_at = _extract_published_at(html)
         return self.upsert_document(
@@ -541,6 +584,8 @@ class SearchService:
                     content = entry.content[0].value
                 content = content or entry.get("summary") or ""
                 content_markdown = html_to_markdown(content)
+                if not content_markdown or not content_markdown.strip():
+                    continue
                 title = entry.get("title")
                 published_at = _parse_datetime(entry.get("published") or entry.get("updated"))
                 documents.append(

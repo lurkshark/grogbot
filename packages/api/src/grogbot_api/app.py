@@ -6,7 +6,7 @@ from typing import List, Optional
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
-from grogbot_search import SearchService, load_config
+from grogbot_search import DocumentNotFoundError, SearchService, load_config
 
 app = FastAPI()
 
@@ -25,22 +25,34 @@ class DocumentUpsertRequest(BaseModel):
     published_at: Optional[datetime] = None
 
 
+class ChunkDocumentRequest(BaseModel):
+    document_id: str
+
+
+class SyncChunkDocumentsRequest(BaseModel):
+    maximum: Optional[int] = None
+
+
 class IngestUrlRequest(BaseModel):
     url: str
+    chunk: bool = False
 
 
 class IngestFeedRequest(BaseModel):
     feed_url: str
     paginate: bool = False
+    chunk: bool = False
 
 
 class IngestOpmlRequest(BaseModel):
     opml_url: str
     paginate: bool = False
+    chunk: bool = False
 
 
 class IngestSitemapRequest(BaseModel):
     sitemap_url: str
+    chunk: bool = False
 
 
 def get_service():
@@ -86,13 +98,16 @@ def list_documents(source_id: Optional[str] = None, service: SearchService = Dep
 
 @app.post("/search/documents")
 def upsert_document(payload: DocumentUpsertRequest, service: SearchService = Depends(get_service)):
-    return service.upsert_document(
-        source_id=payload.source_id,
-        canonical_url=payload.canonical_url,
-        title=payload.title,
-        published_at=payload.published_at,
-        content_markdown=payload.content_markdown,
-    )
+    try:
+        return service.upsert_document(
+            source_id=payload.source_id,
+            canonical_url=payload.canonical_url,
+            title=payload.title,
+            published_at=payload.published_at,
+            content_markdown=payload.content_markdown,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/search/documents/{document_id}")
@@ -108,24 +123,60 @@ def delete_document(document_id: str, service: SearchService = Depends(get_servi
     return {"deleted": service.delete_document(document_id)}
 
 
+@app.post("/search/documents/chunk")
+def chunk_document(payload: ChunkDocumentRequest, service: SearchService = Depends(get_service)):
+    try:
+        count = service.chunk_document(payload.document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document not found") from exc
+    return {"chunks_created": count}
+
+
+@app.post("/search/documents/chunk/sync")
+def chunk_documents(payload: SyncChunkDocumentsRequest, service: SearchService = Depends(get_service)):
+    count = service.synchronize_document_chunks(maximum=payload.maximum)
+    return {"chunks_created": count}
+
+
 @app.post("/search/ingest/url")
 def ingest_url(payload: IngestUrlRequest, service: SearchService = Depends(get_service)):
-    return service.create_document_from_url(payload.url)
+    try:
+        document = service.create_document_from_url(payload.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload.chunk and not service.document_has_chunks(document.id):
+        service.chunk_document(document.id)
+    return document
 
 
 @app.post("/search/ingest/feed")
 def ingest_feed(payload: IngestFeedRequest, service: SearchService = Depends(get_service)):
-    return service.create_documents_from_feed(payload.feed_url, paginate=payload.paginate)
+    documents = service.create_documents_from_feed(payload.feed_url, paginate=payload.paginate)
+    if payload.chunk:
+        for document in documents:
+            if not service.document_has_chunks(document.id):
+                service.chunk_document(document.id)
+    return documents
 
 
 @app.post("/search/ingest/opml")
 def ingest_opml(payload: IngestOpmlRequest, service: SearchService = Depends(get_service)):
-    return service.create_documents_from_opml(payload.opml_url, paginate=payload.paginate)
+    documents = service.create_documents_from_opml(payload.opml_url, paginate=payload.paginate)
+    if payload.chunk:
+        for document in documents:
+            if not service.document_has_chunks(document.id):
+                service.chunk_document(document.id)
+    return documents
 
 
 @app.post("/search/ingest/sitemap")
 def ingest_sitemap(payload: IngestSitemapRequest, service: SearchService = Depends(get_service)):
-    return service.create_documents_from_sitemap(payload.sitemap_url)
+    documents = service.create_documents_from_sitemap(payload.sitemap_url)
+    if payload.chunk:
+        for document in documents:
+            if not service.document_has_chunks(document.id):
+                service.chunk_document(document.id)
+    return documents
 
 
 @app.get("/search/query")

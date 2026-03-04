@@ -236,16 +236,6 @@ def bootstrap(
 
     sources_list = list(sources)
     with _service() as service:
-        if not skip_sitemaps:
-            for source in sources_list:
-                sitemap = source.get("sitemap")
-                if not sitemap:
-                    continue
-                typer.echo(f"Scraping sitemap {sitemap}")
-                try:
-                    service.create_documents_from_sitemap(sitemap, bootstrap=True)
-                except Exception as exc:
-                    print(f"Bootstrap failed for sitemap {sitemap}: {exc}", file=sys.stderr)
         if not skip_feeds:
             for source in sources_list:
                 feed = source.get("feed")
@@ -256,6 +246,16 @@ def bootstrap(
                     service.create_documents_from_feed(feed, paginate=True)
                 except Exception as exc:
                     print(f"Bootstrap failed for feed {feed}: {exc}", file=sys.stderr)
+        if not skip_sitemaps:
+            for source in sources_list:
+                sitemap = source.get("sitemap")
+                if not sitemap:
+                    continue
+                typer.echo(f"Scraping sitemap {sitemap}")
+                try:
+                    service.create_documents_from_sitemap(sitemap, bootstrap=True)
+                except Exception as exc:
+                    print(f"Bootstrap failed for sitemap {sitemap}: {exc}", file=sys.stderr)
 
 
 @search_app.command("query")

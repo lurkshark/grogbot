@@ -22,7 +22,7 @@ from readability import Document as ReadabilityDocument
 from grogbot_search.chunking import chunk_markdown
 from grogbot_search.embeddings import embed_texts
 from grogbot_search.ids import document_id_for_url, source_id_for_domain
-from grogbot_search.models import Chunk, Document, SearchResult, Source
+from grogbot_search.models import Chunk, DatasetStatistics, Document, SearchResult, Source
 
 
 @dataclass
@@ -472,6 +472,66 @@ class SearchService:
             data["published_at"] = _parse_datetime(data["published_at"])
             documents.append(Document(**data))
         return documents
+
+    def statistics(self, source_id: Optional[str] = None) -> DatasetStatistics:
+        def _count(query: str, params: tuple = ()) -> int:
+            row = self.connection.execute(query, params).fetchone()
+            return int(row["count"]) if row else 0
+
+        with self.connection:
+            if source_id:
+                params = (source_id,)
+                total_sources = _count("SELECT COUNT(*) AS count FROM sources WHERE id = ?", params)
+                total_documents = _count("SELECT COUNT(*) AS count FROM documents WHERE source_id = ?", params)
+                total_chunks = _count(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM chunks
+                    JOIN documents ON documents.id = chunks.document_id
+                    WHERE documents.source_id = ?
+                    """,
+                    params,
+                )
+                total_links = _count(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM links
+                    JOIN documents ON documents.id = links.from_document_id
+                    WHERE documents.source_id = ?
+                    """,
+                    params,
+                )
+                embedded_chunks = _count(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM chunks_vec
+                    JOIN chunks ON chunks_vec.rowid = chunks.id
+                    JOIN documents ON documents.id = chunks.document_id
+                    WHERE documents.source_id = ?
+                    """,
+                    params,
+                )
+            else:
+                total_sources = _count("SELECT COUNT(*) AS count FROM sources")
+                total_documents = _count("SELECT COUNT(*) AS count FROM documents")
+                total_chunks = _count("SELECT COUNT(*) AS count FROM chunks")
+                total_links = _count("SELECT COUNT(*) AS count FROM links")
+                embedded_chunks = _count("SELECT COUNT(*) AS count FROM chunks_vec")
+
+        embedding_progress = (embedded_chunks / total_chunks * 100.0) if total_chunks else 0.0
+        avg_chunks_per_document = (total_chunks / total_documents) if total_documents else 0.0
+        avg_documents_per_source = (total_documents / total_sources) if total_sources else 0.0
+
+        return DatasetStatistics(
+            total_sources=total_sources,
+            total_documents=total_documents,
+            total_chunks=total_chunks,
+            total_links=total_links,
+            embedded_chunks=embedded_chunks,
+            embedding_progress=embedding_progress,
+            avg_chunks_per_document=avg_chunks_per_document,
+            avg_documents_per_source=avg_documents_per_source,
+        )
 
     def document_has_chunks(self, document_id: str) -> bool:
         row = self.connection.execute(

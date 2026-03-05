@@ -218,6 +218,93 @@ def test_list_documents_can_filter_by_source(service: SearchService):
     assert [document.id for document in filtered] == [doc_a.id]
 
 
+def test_statistics_global_and_source_scoped(service: SearchService):
+    source_a = service.upsert_source("alpha.example", name="Alpha")
+    source_b = service.upsert_source("beta.example", name="Beta")
+
+    service.upsert_document(
+        source_id=source_a.id,
+        canonical_url="https://alpha.example/doc-1",
+        title="Doc 1",
+        published_at=None,
+        content_markdown="alpha",
+    )
+    doc_a2 = service.upsert_document(
+        source_id=source_a.id,
+        canonical_url="https://alpha.example/doc-2",
+        title="Doc 2",
+        published_at=None,
+        content_markdown="alpha [link](https://external.example/one)",
+    )
+    doc_b1 = service.upsert_document(
+        source_id=source_b.id,
+        canonical_url="https://beta.example/doc-1",
+        title="Doc B1",
+        published_at=None,
+        content_markdown="beta [link](https://external.example/two)",
+    )
+
+    service.embed_document_chunks(doc_a2.id)
+    service.embed_document_chunks(doc_b1.id)
+
+    stats = service.statistics()
+
+    assert stats.total_sources == 2
+    assert stats.total_documents == 3
+    assert stats.total_chunks == 3
+    assert stats.total_links == 2
+    assert stats.embedded_chunks == 2
+    assert stats.embedding_progress == pytest.approx(2 / 3 * 100.0)
+    assert stats.avg_chunks_per_document == pytest.approx(1.0)
+    assert stats.avg_documents_per_source == pytest.approx(1.5)
+
+    source_stats = service.statistics(source_id=source_a.id)
+
+    assert source_stats.total_sources == 1
+    assert source_stats.total_documents == 2
+    assert source_stats.total_chunks == 2
+    assert source_stats.total_links == 1
+    assert source_stats.embedded_chunks == 1
+    assert source_stats.embedding_progress == pytest.approx(50.0)
+    assert source_stats.avg_chunks_per_document == pytest.approx(1.0)
+    assert source_stats.avg_documents_per_source == pytest.approx(2.0)
+
+
+def test_statistics_empty_dataset_returns_zero(service: SearchService):
+    stats = service.statistics()
+
+    assert stats.total_sources == 0
+    assert stats.total_documents == 0
+    assert stats.total_chunks == 0
+    assert stats.total_links == 0
+    assert stats.embedded_chunks == 0
+    assert stats.embedding_progress == 0.0
+    assert stats.avg_chunks_per_document == 0.0
+    assert stats.avg_documents_per_source == 0.0
+
+
+def test_statistics_missing_source_returns_zero(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/one",
+        title="One",
+        published_at=None,
+        content_markdown="alpha",
+    )
+
+    stats = service.statistics(source_id="missing-source")
+
+    assert stats.total_sources == 0
+    assert stats.total_documents == 0
+    assert stats.total_chunks == 0
+    assert stats.total_links == 0
+    assert stats.embedded_chunks == 0
+    assert stats.embedding_progress == 0.0
+    assert stats.avg_chunks_per_document == 0.0
+    assert stats.avg_documents_per_source == 0.0
+
+
 def test_chunk_document_returns_count(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
     document = service.upsert_document(

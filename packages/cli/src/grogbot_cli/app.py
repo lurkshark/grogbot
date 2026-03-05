@@ -145,28 +145,28 @@ def document_delete(document_id: str = typer.Argument(..., help="Document ID")):
     typer.echo(_dump({"deleted": deleted}))
 
 
-@document_app.command("chunk")
-def document_chunk(document_id: str = typer.Argument(..., help="Document ID")):
+@document_app.command("embed")
+def document_embed(document_id: str = typer.Argument(..., help="Document ID")):
     with _service() as service:
         try:
-            count = service.chunk_document(document_id)
+            count = service.embed_document_chunks(document_id)
         except DocumentNotFoundError as exc:
             typer.echo("Document not found", err=True)
             raise typer.Exit(code=1) from exc
-    typer.echo(_dump({"chunks_created": count}))
+    typer.echo(_dump({"vectors_created": count}))
 
 
-@document_app.command("chunk-sync")
-def document_chunk_sync(maximum: Optional[int] = typer.Option(None, "--maximum")):
+@document_app.command("embed-sync")
+def document_embed_sync(maximum: Optional[int] = typer.Option(None, "--maximum")):
     with _service() as service:
-        count = service.synchronize_document_chunks(maximum=maximum)
-    typer.echo(_dump({"chunks_created": count}))
+        count = service.synchronize_document_embeddings(maximum=maximum)
+    typer.echo(_dump({"vectors_created": count}))
 
 
 @search_app.command("ingest-url")
 def ingest_url(
     url: str = typer.Argument(..., help="URL to ingest"),
-    chunk: bool = typer.Option(False, "--chunk", is_flag=True, help="Immediately chunk ingested documents"),
+    embed: bool = typer.Option(False, "--embed", is_flag=True, help="Immediately embed ingested documents"),
 ):
     with _service() as service:
         try:
@@ -174,8 +174,8 @@ def ingest_url(
         except ValueError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=1) from exc
-        if chunk and not service.document_has_chunks(document.id):
-            service.chunk_document(document.id)
+        if embed:
+            service.embed_document_chunks(document.id)
     typer.echo(_dump(document.model_dump()))
 
 
@@ -183,14 +183,13 @@ def ingest_url(
 def ingest_feed(
     feed_url: str = typer.Argument(..., help="Feed URL to ingest"),
     paginate: bool = typer.Option(False, "--paginate", help="Follow rel=next pagination"),
-    chunk: bool = typer.Option(False, "--chunk", is_flag=True, help="Immediately chunk ingested documents"),
+    embed: bool = typer.Option(False, "--embed", is_flag=True, help="Immediately embed ingested documents"),
 ):
     with _service() as service:
         documents = service.create_documents_from_feed(feed_url, paginate=paginate)
-        if chunk:
+        if embed:
             for document in documents:
-                if not service.document_has_chunks(document.id):
-                    service.chunk_document(document.id)
+                service.embed_document_chunks(document.id)
     typer.echo(_dump([doc.model_dump() for doc in documents]))
 
 
@@ -198,28 +197,26 @@ def ingest_feed(
 def ingest_opml(
     opml_url: str = typer.Argument(..., help="OPML URL to ingest"),
     paginate: bool = typer.Option(False, "--paginate", help="Follow rel=next pagination for feeds"),
-    chunk: bool = typer.Option(False, "--chunk", is_flag=True, help="Immediately chunk ingested documents"),
+    embed: bool = typer.Option(False, "--embed", is_flag=True, help="Immediately embed ingested documents"),
 ):
     with _service() as service:
         documents = service.create_documents_from_opml(opml_url, paginate=paginate)
-        if chunk:
+        if embed:
             for document in documents:
-                if not service.document_has_chunks(document.id):
-                    service.chunk_document(document.id)
+                service.embed_document_chunks(document.id)
     typer.echo(_dump([doc.model_dump() for doc in documents]))
 
 
 @search_app.command("ingest-sitemap")
 def ingest_sitemap(
     sitemap_url: str = typer.Argument(..., help="Sitemap URL to ingest"),
-    chunk: bool = typer.Option(False, "--chunk", is_flag=True, help="Immediately chunk ingested documents"),
+    embed: bool = typer.Option(False, "--embed", is_flag=True, help="Immediately embed ingested documents"),
 ):
     with _service() as service:
         documents = service.create_documents_from_sitemap(sitemap_url)
-        if chunk:
+        if embed:
             for document in documents:
-                if not service.document_has_chunks(document.id):
-                    service.chunk_document(document.id)
+                service.embed_document_chunks(document.id)
     typer.echo(_dump([doc.model_dump() for doc in documents]))
 
 
@@ -265,7 +262,7 @@ def query(
     summary: bool = typer.Option(
         False,
         "--summary",
-        help="Omit content_markdown/content_text from each search result",
+        help="Omit chunk content_text from each search result",
     ),
 ):
     with _service() as service:
@@ -274,7 +271,6 @@ def query(
     exclude = None
     if summary:
         exclude = {
-            "document": {"content_markdown"},
             "chunk": {"content_text"},
         }
 

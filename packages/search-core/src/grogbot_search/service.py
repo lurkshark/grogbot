@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import html
 import re
 import time
@@ -79,6 +80,10 @@ def _normalize_domain(url: str) -> str:
 
 def _canonicalize_url(url: str) -> str:
     return url.strip()
+
+
+def _content_hash(content_markdown: str) -> str:
+    return hashlib.sha256(content_markdown.encode("utf-8")).hexdigest()[:6]
 
 
 def _extract_feed_urls_from_opml(xml_content: str) -> List[str]:
@@ -255,7 +260,9 @@ class SearchService:
                 canonical_url TEXT NOT NULL UNIQUE,
                 title TEXT,
                 published_at TEXT,
-                content_markdown TEXT NOT NULL,
+                content_hash TEXT NOT NULL
+                    CHECK (length(content_hash) = 6)
+                    CHECK (content_hash GLOB '[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'),
                 FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
             );
 
@@ -305,7 +312,70 @@ class SearchService:
             END;
             """
         )
+        self._migrate_legacy_documents_table()
         self.connection.commit()
+
+    def _migrate_legacy_documents_table(self) -> None:
+        columns = {
+            row["name"]
+            for row in self.connection.execute("PRAGMA table_info(documents)").fetchall()
+        }
+        if "content_markdown" not in columns or "content_hash" in columns:
+            return
+
+        legacy_rows = self.connection.execute(
+            """
+            SELECT id, source_id, canonical_url, title, published_at, content_markdown
+            FROM documents
+            ORDER BY id
+            """
+        ).fetchall()
+
+        self.connection.commit()
+        self.connection.execute("PRAGMA foreign_keys = OFF")
+        try:
+            self.connection.execute("BEGIN")
+            self.connection.executescript(
+                """
+                ALTER TABLE documents RENAME TO documents_legacy;
+
+                CREATE TABLE documents (
+                    id TEXT PRIMARY KEY,
+                    source_id TEXT NOT NULL,
+                    canonical_url TEXT NOT NULL UNIQUE,
+                    title TEXT,
+                    published_at TEXT,
+                    content_hash TEXT NOT NULL
+                        CHECK (length(content_hash) = 6)
+                        CHECK (content_hash GLOB '[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'),
+                    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
+                );
+                """
+            )
+
+            for row in legacy_rows:
+                self.connection.execute(
+                    """
+                    INSERT INTO documents (id, source_id, canonical_url, title, published_at, content_hash)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row["id"],
+                        row["source_id"],
+                        row["canonical_url"],
+                        row["title"],
+                        row["published_at"],
+                        _content_hash(row["content_markdown"]),
+                    ),
+                )
+
+            self.connection.execute("DROP TABLE documents_legacy")
+            self.connection.execute("COMMIT")
+        except Exception:
+            self.connection.execute("ROLLBACK")
+            raise
+        finally:
+            self.connection.execute("PRAGMA foreign_keys = ON")
 
     def upsert_source(self, canonical_domain: str, name: Optional[str] = None, rss_feed: Optional[str] = None) -> Source:
         canonical_domain = canonical_domain.strip().lower()
@@ -365,26 +435,30 @@ class SearchService:
     ) -> Document:
         if not content_markdown or not content_markdown.strip():
             raise ValueError("content_markdown cannot be empty")
+
         canonical_url = _canonicalize_url(canonical_url)
+        new_content_hash = _content_hash(content_markdown)
+
         row = self.connection.execute(
-            "SELECT id, content_markdown FROM documents WHERE canonical_url = ?",
+            "SELECT id, content_hash FROM documents WHERE canonical_url = ?",
             (canonical_url,),
         ).fetchone()
+
         content_changed = True
         if row:
             document_id = row["id"]
-            content_changed = row["content_markdown"] != content_markdown
+            content_changed = row["content_hash"] != new_content_hash
             self.connection.execute(
                 """
                 UPDATE documents
-                SET source_id = ?, title = ?, published_at = ?, content_markdown = ?
+                SET source_id = ?, title = ?, published_at = ?, content_hash = ?
                 WHERE id = ?
                 """,
                 (
                     source_id,
                     title,
                     _serialize_datetime(published_at),
-                    content_markdown,
+                    new_content_hash,
                     document_id,
                 ),
             )
@@ -392,7 +466,7 @@ class SearchService:
             document_id = document_id_for_url(canonical_url)
             self.connection.execute(
                 """
-                INSERT INTO documents (id, source_id, canonical_url, title, published_at, content_markdown)
+                INSERT INTO documents (id, source_id, canonical_url, title, published_at, content_hash)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -401,12 +475,20 @@ class SearchService:
                     canonical_url,
                     title,
                     _serialize_datetime(published_at),
-                    content_markdown,
+                    new_content_hash,
                 ),
             )
+
         if content_changed:
             self.connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
             self.connection.execute("DELETE FROM links WHERE from_document_id = ?", (document_id,))
+            self._insert_plaintext_chunks(document_id=document_id, content_markdown=content_markdown)
+            self._insert_document_links(
+                document_id=document_id,
+                source_canonical_url=canonical_url,
+                content_markdown=content_markdown,
+            )
+
         self.connection.commit()
         return Document(
             id=document_id,
@@ -414,13 +496,13 @@ class SearchService:
             canonical_url=canonical_url,
             title=title,
             published_at=published_at,
-            content_markdown=content_markdown,
+            content_hash=new_content_hash,
         )
 
     def get_document(self, document_id: str) -> Optional[Document]:
         row = self.connection.execute(
             """
-            SELECT id, source_id, canonical_url, title, published_at, content_markdown
+            SELECT id, source_id, canonical_url, title, published_at, content_hash
             FROM documents WHERE id = ?
             """,
             (document_id,),
@@ -435,7 +517,7 @@ class SearchService:
         if source_id:
             rows = self.connection.execute(
                 """
-                SELECT id, source_id, canonical_url, title, published_at, content_markdown
+                SELECT id, source_id, canonical_url, title, published_at, content_hash
                 FROM documents WHERE source_id = ? ORDER BY canonical_url
                 """,
                 (source_id,),
@@ -443,7 +525,7 @@ class SearchService:
         else:
             rows = self.connection.execute(
                 """
-                SELECT id, source_id, canonical_url, title, published_at, content_markdown
+                SELECT id, source_id, canonical_url, title, published_at, content_hash
                 FROM documents ORDER BY canonical_url
                 """
             ).fetchall()
@@ -466,29 +548,44 @@ class SearchService:
         self.connection.commit()
         return cursor.rowcount > 0
 
-    def chunk_document(self, document_id: str) -> int:
-        document = self.get_document(document_id)
-        if not document:
+    def embed_document_chunks(self, document_id: str) -> int:
+        if not self.get_document(document_id):
             raise DocumentNotFoundError(f"Document not found: {document_id}")
-        self.connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
-        self.connection.execute("DELETE FROM links WHERE from_document_id = ?", (document_id,))
-        created = self._create_chunks(document_id, document.content_markdown)
-        self._insert_document_links(
-            document_id=document_id,
-            source_canonical_url=document.canonical_url,
-            content_markdown=document.content_markdown,
-        )
-        self.connection.commit()
-        return len(created)
 
-    def synchronize_document_chunks(self, maximum: Optional[int] = None) -> int:
+        rows = self.connection.execute(
+            """
+            SELECT chunks.id, chunks.content_text
+            FROM chunks
+            LEFT JOIN chunks_vec ON chunks_vec.rowid = chunks.id
+            WHERE chunks.document_id = ? AND chunks_vec.rowid IS NULL
+            ORDER BY chunks.chunk_index
+            """,
+            (document_id,),
+        ).fetchall()
+        if not rows:
+            return 0
+
+        texts = [row["content_text"] for row in rows]
+        embeddings = embed_texts(texts, prompt="search_document")
+        for row, embedding in zip(rows, embeddings):
+            self.connection.execute(
+                "INSERT INTO chunks_vec (rowid, embedding) VALUES (?, ?)",
+                (row["id"], self._sqlite_vec.serialize_float32(embedding)),
+            )
+        self.connection.commit()
+        return len(rows)
+
+    def synchronize_document_embeddings(self, maximum: Optional[int] = None) -> int:
         if maximum is not None and maximum <= 0:
             return 0
+
         query = (
             "SELECT documents.id "
             "FROM documents "
-            "LEFT JOIN chunks ON chunks.document_id = documents.id "
-            "WHERE chunks.id IS NULL "
+            "JOIN chunks ON chunks.document_id = documents.id "
+            "LEFT JOIN chunks_vec ON chunks_vec.rowid = chunks.id "
+            "WHERE chunks_vec.rowid IS NULL "
+            "GROUP BY documents.id "
             "ORDER BY documents.id"
         )
         params: tuple = ()
@@ -496,10 +593,18 @@ class SearchService:
             query = f"{query} LIMIT ?"
             params = (maximum,)
         rows = self.connection.execute(query, params).fetchall()
+
         total_created = 0
         for row in rows:
-            total_created += self.chunk_document(row["id"])
+            total_created += self.embed_document_chunks(row["id"])
         return total_created
+
+    # Backwards-compatible aliases.
+    def chunk_document(self, document_id: str) -> int:
+        return self.embed_document_chunks(document_id)
+
+    def synchronize_document_chunks(self, maximum: Optional[int] = None) -> int:
+        return self.synchronize_document_embeddings(maximum=maximum)
 
     def _insert_document_links(self, *, document_id: str, source_canonical_url: str, content_markdown: str) -> None:
         to_document_ids = _to_document_ids_from_markdown(
@@ -513,9 +618,8 @@ class SearchService:
                 (document_id, to_document_id),
             )
 
-    def _create_chunks(self, document_id: str, content_markdown: str) -> List[Chunk]:
+    def _insert_plaintext_chunks(self, *, document_id: str, content_markdown: str) -> List[Chunk]:
         chunks = chunk_markdown(content_markdown)
-        embeddings = embed_texts(chunks, prompt="search_document") if chunks else []
         created: List[Chunk] = []
         for index, content_text in enumerate(chunks):
             cursor = self.connection.execute(
@@ -523,11 +627,6 @@ class SearchService:
                 (document_id, index, content_text),
             )
             chunk_id = int(cursor.lastrowid)
-            embedding = embeddings[index]
-            self.connection.execute(
-                "INSERT INTO chunks_vec (rowid, embedding) VALUES (?, ?)",
-                (chunk_id, self._sqlite_vec.serialize_float32(embedding)),
-            )
             created.append(
                 Chunk(id=chunk_id, document_id=document_id, chunk_index=index, content_text=content_text)
             )
@@ -862,7 +961,7 @@ class SearchService:
                 documents.canonical_url,
                 documents.title,
                 documents.published_at,
-                documents.content_markdown
+                documents.content_hash
             FROM chunks
             JOIN documents ON documents.id = chunks.document_id
             WHERE chunks.id IN ({placeholders})
@@ -889,7 +988,7 @@ class SearchService:
                 canonical_url=data["canonical_url"],
                 title=data["title"],
                 published_at=_parse_datetime(data["published_at"]),
-                content_markdown=data["content_markdown"],
+                content_hash=data["content_hash"],
             )
             score = scores[chunk_id]
             results.append(

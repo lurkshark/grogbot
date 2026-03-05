@@ -255,6 +255,13 @@ def bootstrap(
                     print(f"Bootstrap failed for sitemap {sitemap}: {exc}", file=sys.stderr)
 
 
+@search_app.command("statistics")
+def statistics(source_id: Optional[str] = typer.Option(None, "--source-id")):
+    with _service() as service:
+        stats = service.statistics(source_id=source_id)
+    typer.echo(_dump(stats.model_dump()))
+
+
 @search_app.command("query")
 def query(
     text: str = typer.Argument(..., help="Search query"),

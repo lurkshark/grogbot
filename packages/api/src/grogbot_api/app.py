@@ -176,6 +176,11 @@ def ingest_sitemap(payload: IngestSitemapRequest, service: SearchService = Depen
     return documents
 
 
+@app.get("/search/statistics")
+def statistics(source_id: Optional[str] = None, service: SearchService = Depends(get_service)):
+    return service.statistics(source_id=source_id)
+
+
 @app.get("/search/query")
 def query(q: str, limit: int = 10, service: SearchService = Depends(get_service)):
     return service.search(q, limit=limit)

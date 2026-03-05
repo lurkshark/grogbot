@@ -38,8 +38,21 @@ GET /search/sources
 POST /search/sources
 GET /search/documents/{document_id}
 POST /search/ingest/url
+POST /search/documents/embed
+POST /search/documents/embed/sync
 GET /search/query?q=hello+world
 ```
+
+## Document storage and embedding workflow
+
+- `content_markdown` is accepted on upsert/ingest inputs, but it is **not persisted** in the `documents` table.
+- Documents now persist a compact `content_hash` (6-character lowercase hex digest).
+- Upsert/ingestion regenerates plaintext chunks and outbound links when content changes.
+- Embeddings are generated explicitly:
+  - CLI: `grogbot search document embed <document_id>`
+  - CLI (bulk): `grogbot search document embed-sync --maximum 100`
+  - API: `POST /search/documents/embed`
+  - API (bulk): `POST /search/documents/embed/sync`
 
 ## Development
 

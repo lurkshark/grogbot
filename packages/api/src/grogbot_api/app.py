@@ -25,34 +25,34 @@ class DocumentUpsertRequest(BaseModel):
     published_at: Optional[datetime] = None
 
 
-class ChunkDocumentRequest(BaseModel):
+class EmbedDocumentRequest(BaseModel):
     document_id: str
 
 
-class SyncChunkDocumentsRequest(BaseModel):
+class SyncEmbedDocumentsRequest(BaseModel):
     maximum: Optional[int] = None
 
 
 class IngestUrlRequest(BaseModel):
     url: str
-    chunk: bool = False
+    embed: bool = False
 
 
 class IngestFeedRequest(BaseModel):
     feed_url: str
     paginate: bool = False
-    chunk: bool = False
+    embed: bool = False
 
 
 class IngestOpmlRequest(BaseModel):
     opml_url: str
     paginate: bool = False
-    chunk: bool = False
+    embed: bool = False
 
 
 class IngestSitemapRequest(BaseModel):
     sitemap_url: str
-    chunk: bool = False
+    embed: bool = False
 
 
 def get_service():
@@ -123,19 +123,19 @@ def delete_document(document_id: str, service: SearchService = Depends(get_servi
     return {"deleted": service.delete_document(document_id)}
 
 
-@app.post("/search/documents/chunk")
-def chunk_document(payload: ChunkDocumentRequest, service: SearchService = Depends(get_service)):
+@app.post("/search/documents/embed")
+def embed_document(payload: EmbedDocumentRequest, service: SearchService = Depends(get_service)):
     try:
-        count = service.chunk_document(payload.document_id)
+        count = service.embed_document_chunks(payload.document_id)
     except DocumentNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Document not found") from exc
-    return {"chunks_created": count}
+    return {"vectors_created": count}
 
 
-@app.post("/search/documents/chunk/sync")
-def chunk_documents(payload: SyncChunkDocumentsRequest, service: SearchService = Depends(get_service)):
-    count = service.synchronize_document_chunks(maximum=payload.maximum)
-    return {"chunks_created": count}
+@app.post("/search/documents/embed/sync")
+def embed_documents(payload: SyncEmbedDocumentsRequest, service: SearchService = Depends(get_service)):
+    count = service.synchronize_document_embeddings(maximum=payload.maximum)
+    return {"vectors_created": count}
 
 
 @app.post("/search/ingest/url")
@@ -144,38 +144,35 @@ def ingest_url(payload: IngestUrlRequest, service: SearchService = Depends(get_s
         document = service.create_document_from_url(payload.url)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if payload.chunk and not service.document_has_chunks(document.id):
-        service.chunk_document(document.id)
+    if payload.embed:
+        service.embed_document_chunks(document.id)
     return document
 
 
 @app.post("/search/ingest/feed")
 def ingest_feed(payload: IngestFeedRequest, service: SearchService = Depends(get_service)):
     documents = service.create_documents_from_feed(payload.feed_url, paginate=payload.paginate)
-    if payload.chunk:
+    if payload.embed:
         for document in documents:
-            if not service.document_has_chunks(document.id):
-                service.chunk_document(document.id)
+            service.embed_document_chunks(document.id)
     return documents
 
 
 @app.post("/search/ingest/opml")
 def ingest_opml(payload: IngestOpmlRequest, service: SearchService = Depends(get_service)):
     documents = service.create_documents_from_opml(payload.opml_url, paginate=payload.paginate)
-    if payload.chunk:
+    if payload.embed:
         for document in documents:
-            if not service.document_has_chunks(document.id):
-                service.chunk_document(document.id)
+            service.embed_document_chunks(document.id)
     return documents
 
 
 @app.post("/search/ingest/sitemap")
 def ingest_sitemap(payload: IngestSitemapRequest, service: SearchService = Depends(get_service)):
     documents = service.create_documents_from_sitemap(payload.sitemap_url)
-    if payload.chunk:
+    if payload.embed:
         for document in documents:
-            if not service.document_has_chunks(document.id):
-                service.chunk_document(document.id)
+            service.embed_document_chunks(document.id)
     return documents
 
 

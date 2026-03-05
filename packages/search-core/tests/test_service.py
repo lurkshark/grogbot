@@ -48,7 +48,7 @@ def test_document_upsert_regenerates_chunks(service: SearchService):
         published_at=None,
         content_markdown="Hello world",
     )
-    service.chunk_document(document.id)
+    service.embed_document_chunks(document.id)
     initial_chunks = _chunk_texts(service, document.id)
 
     updated = service.upsert_document(
@@ -58,11 +58,13 @@ def test_document_upsert_regenerates_chunks(service: SearchService):
         published_at=None,
         content_markdown="Hello world updated content",
     )
-    assert _chunk_texts(service, updated.id) == []
-    service.chunk_document(updated.id)
     updated_chunks = _chunk_texts(service, updated.id)
 
     assert initial_chunks != updated_chunks
+    vector_rows = service.connection.execute(
+        "SELECT COUNT(*) AS count FROM chunks_vec",
+    ).fetchone()
+    assert vector_rows["count"] == 0
 
 
 def test_upsert_document_without_content_change_preserves_existing_chunks(service: SearchService):
@@ -101,6 +103,38 @@ def test_upsert_document_without_content_change_preserves_existing_chunks(servic
     ]
 
 
+def test_upsert_document_without_content_change_preserves_existing_links(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    document = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/stable-links",
+        title="Stable Links",
+        published_at=None,
+        content_markdown="[other](https://other.example/target)",
+    )
+
+    original_links = service.connection.execute(
+        "SELECT to_document_id FROM links WHERE from_document_id = ?",
+        (document.id,),
+    ).fetchall()
+    original_hash = document.content_hash
+
+    updated = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/stable-links",
+        title="Stable Links (renamed)",
+        published_at=None,
+        content_markdown="[other](https://other.example/target)",
+    )
+
+    updated_links = service.connection.execute(
+        "SELECT to_document_id FROM links WHERE from_document_id = ?",
+        (updated.id,),
+    ).fetchall()
+    assert updated.content_hash == original_hash
+    assert [row["to_document_id"] for row in updated_links] == [row["to_document_id"] for row in original_links]
+
+
 def test_upsert_document_rejects_empty_content(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
 
@@ -115,6 +149,26 @@ def test_upsert_document_rejects_empty_content(service: SearchService):
 
     doc_count = service.connection.execute("SELECT COUNT(*) AS count FROM documents").fetchone()["count"]
     assert doc_count == 0
+
+
+def test_documents_table_enforces_content_hash_shape(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        service.connection.execute(
+            """
+            INSERT INTO documents (id, source_id, canonical_url, title, published_at, content_hash)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "doc-invalid-hash",
+                source.id,
+                "https://example.com/invalid-hash",
+                "Invalid hash",
+                None,
+                "ABC123",
+            ),
+        )
 
 
 def test_delete_document_cascades_chunks_and_vector_rows(service: SearchService):
@@ -207,17 +261,27 @@ def test_synchronize_document_chunks_respects_maximum(service: SearchService):
     )
 
     created = service.synchronize_document_chunks(maximum=1)
-    chunked_docs = service.connection.execute(
-        "SELECT DISTINCT document_id FROM chunks ORDER BY document_id",
+    embedded_docs = service.connection.execute(
+        """
+        SELECT DISTINCT chunks.document_id
+        FROM chunks
+        JOIN chunks_vec ON chunks_vec.rowid = chunks.id
+        ORDER BY chunks.document_id
+        """
     ).fetchall()
-    assert len(chunked_docs) == 1
-    assert created == service.connection.execute("SELECT COUNT(*) AS count FROM chunks").fetchone()["count"]
+    assert len(embedded_docs) == 1
+    assert created > 0
 
     service.synchronize_document_chunks()
-    chunked_docs = service.connection.execute(
-        "SELECT DISTINCT document_id FROM chunks ORDER BY document_id",
+    embedded_docs = service.connection.execute(
+        """
+        SELECT DISTINCT chunks.document_id
+        FROM chunks
+        JOIN chunks_vec ON chunks_vec.rowid = chunks.id
+        ORDER BY chunks.document_id
+        """
     ).fetchall()
-    assert len(chunked_docs) == 2
+    assert len(embedded_docs) == 2
 
 
 def test_synchronize_document_chunks_non_positive_maximum_is_noop(service: SearchService):
@@ -232,8 +296,8 @@ def test_synchronize_document_chunks_non_positive_maximum_is_noop(service: Searc
 
     assert service.synchronize_document_chunks(maximum=0) == 0
     assert service.synchronize_document_chunks(maximum=-5) == 0
-    chunk_count = service.connection.execute("SELECT COUNT(*) AS count FROM chunks").fetchone()["count"]
-    assert chunk_count == 0
+    vector_count = service.connection.execute("SELECT COUNT(*) AS count FROM chunks_vec").fetchone()["count"]
+    assert vector_count == 0
 
 
 # Link graph behavior
@@ -359,16 +423,17 @@ def test_outbound_links_ignore_self_and_follow_content_delete_and_refresh_lifecy
     ).fetchone()
     assert stale_links["count"] == 0
 
-    service.connection.execute(
-        "UPDATE documents SET content_markdown = ? WHERE id = ?",
-        ("[refreshed](https://external.example/refreshed)", updated.id),
+    refreshed = service.upsert_document(
+        source_id=source.id,
+        canonical_url=canonical_url,
+        title="Lifecycle refreshed",
+        published_at=None,
+        content_markdown="[refreshed](https://external.example/refreshed)",
     )
-    service.connection.commit()
-    service.chunk_document(updated.id)
 
     refreshed_links = service.connection.execute(
         "SELECT to_document_id FROM links WHERE from_document_id = ?",
-        (updated.id,),
+        (refreshed.id,),
     ).fetchall()
     assert [row["to_document_id"] for row in refreshed_links] == [
         service_module.document_id_for_url(service_module._canonicalize_url("https://external.example/refreshed"))
@@ -604,7 +669,14 @@ def test_create_document_from_url(service: SearchService, http_server):
     document = service.create_document_from_url(f"{http_server}/article")
 
     assert document.canonical_url == f"{http_server}/canonical"
-    assert "Article Heading" in document.content_markdown or "Hello world" in document.content_markdown
+    assert len(document.content_hash) == 6
+    assert all(char in "0123456789abcdef" for char in document.content_hash)
+
+    chunk_rows = service.connection.execute(
+        "SELECT COUNT(*) AS count FROM chunks WHERE document_id = ?",
+        (document.id,),
+    ).fetchone()
+    assert chunk_rows["count"] > 0
 
     source = service.get_source(document.source_id)
     assert source is not None
@@ -679,7 +751,8 @@ def test_create_documents_from_feed_uses_summary_when_content_missing(service: S
 
     assert len(documents) == 1
     assert documents[0].canonical_url == f"{http_server}/summary-entry"
-    assert "Summary based content" in documents[0].content_markdown
+    chunk_text = " ".join(_chunk_texts(service, documents[0].id))
+    assert "Summary based content" in chunk_text
 
 
 def test_create_documents_from_feed_backfills_missing_source_attributes(service: SearchService, http_server):
@@ -879,11 +952,10 @@ def test_document_has_chunks_reflects_chunk_lifecycle(service: SearchService):
         content_markdown="chunk me",
     )
 
-    assert service.document_has_chunks(document.id) is False
-
-    service.chunk_document(document.id)
-
     assert service.document_has_chunks(document.id) is True
+
+    assert service.delete_document(document.id) is True
+    assert service.document_has_chunks(document.id) is False
 
 
 def test_parse_datetime_returns_none_for_invalid_values():
@@ -1092,7 +1164,7 @@ def test_create_documents_from_opml_continues_when_one_feed_ingestion_fails(
         canonical_url="https://example.com/fallback",
         title="Fallback",
         published_at=None,
-        content_markdown="fallback",
+        content_hash="d0f631",
     )
 
     def fake_create_documents_from_feed(feed_url: str, paginate: bool = False):  # noqa: ARG001 - signature parity

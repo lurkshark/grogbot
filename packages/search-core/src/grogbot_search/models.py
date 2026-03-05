@@ -19,7 +19,7 @@ class Document(BaseModel):
     canonical_url: str
     title: Optional[str] = None
     published_at: Optional[datetime] = None
-    content_markdown: str
+    content_hash: str
 
 
 class Chunk(BaseModel):

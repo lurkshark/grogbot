@@ -596,13 +596,6 @@ class SearchService:
             total_created += self.embed_document_chunks(row["id"])
         return total_created
 
-    # Backwards-compatible aliases.
-    def chunk_document(self, document_id: str) -> int:
-        return self.embed_document_chunks(document_id)
-
-    def synchronize_document_chunks(self, maximum: Optional[int] = None) -> int:
-        return self.synchronize_document_embeddings(maximum=maximum)
-
     def _insert_document_links(self, *, document_id: str, source_canonical_url: str, content_markdown: str) -> None:
         to_document_ids = _to_document_ids_from_markdown(
             source_document_id=document_id,

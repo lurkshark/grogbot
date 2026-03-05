@@ -46,4 +46,6 @@ class DatasetStatistics(BaseModel):
     embedded_chunks: int
     embedding_progress: float = Field(..., description="Percentage of chunks with embeddings (0-100).")
     avg_chunks_per_document: float = Field(..., description="Average number of chunks per document.")
-    documents_per_source: float = Field(..., description="Average number of documents per source.")
+    avg_documents_per_source: float = Field(
+        ..., description="Average number of documents per source."
+    )

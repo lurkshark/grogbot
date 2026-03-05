@@ -520,7 +520,7 @@ class SearchService:
 
         embedding_progress = (embedded_chunks / total_chunks * 100.0) if total_chunks else 0.0
         avg_chunks_per_document = (total_chunks / total_documents) if total_documents else 0.0
-        documents_per_source = (total_documents / total_sources) if total_sources else 0.0
+        avg_documents_per_source = (total_documents / total_sources) if total_sources else 0.0
 
         return DatasetStatistics(
             total_sources=total_sources,
@@ -530,7 +530,7 @@ class SearchService:
             embedded_chunks=embedded_chunks,
             embedding_progress=embedding_progress,
             avg_chunks_per_document=avg_chunks_per_document,
-            documents_per_source=documents_per_source,
+            avg_documents_per_source=avg_documents_per_source,
         )
 
     def document_has_chunks(self, document_id: str) -> bool:

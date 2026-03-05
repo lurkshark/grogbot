@@ -256,7 +256,7 @@ def test_statistics_global_and_source_scoped(service: SearchService):
     assert stats.embedded_chunks == 2
     assert stats.embedding_progress == pytest.approx(2 / 3 * 100.0)
     assert stats.avg_chunks_per_document == pytest.approx(1.0)
-    assert stats.documents_per_source == pytest.approx(1.5)
+    assert stats.avg_documents_per_source == pytest.approx(1.5)
 
     source_stats = service.statistics(source_id=source_a.id)
 
@@ -267,7 +267,7 @@ def test_statistics_global_and_source_scoped(service: SearchService):
     assert source_stats.embedded_chunks == 1
     assert source_stats.embedding_progress == pytest.approx(50.0)
     assert source_stats.avg_chunks_per_document == pytest.approx(1.0)
-    assert source_stats.documents_per_source == pytest.approx(2.0)
+    assert source_stats.avg_documents_per_source == pytest.approx(2.0)
 
 
 def test_statistics_empty_dataset_returns_zero(service: SearchService):
@@ -280,7 +280,7 @@ def test_statistics_empty_dataset_returns_zero(service: SearchService):
     assert stats.embedded_chunks == 0
     assert stats.embedding_progress == 0.0
     assert stats.avg_chunks_per_document == 0.0
-    assert stats.documents_per_source == 0.0
+    assert stats.avg_documents_per_source == 0.0
 
 
 def test_statistics_missing_source_returns_zero(service: SearchService):
@@ -302,7 +302,7 @@ def test_statistics_missing_source_returns_zero(service: SearchService):
     assert stats.embedded_chunks == 0
     assert stats.embedding_progress == 0.0
     assert stats.avg_chunks_per_document == 0.0
-    assert stats.documents_per_source == 0.0
+    assert stats.avg_documents_per_source == 0.0
 
 
 def test_chunk_document_returns_count(service: SearchService):

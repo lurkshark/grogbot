@@ -114,6 +114,21 @@ def http_server():
     </html>
     """
 
+    responses["/shop/product"] = f"""
+    <html>
+      <head>
+        <title>Shop Product</title>
+        <link rel="canonical" href="{base_url}/shop/product" />
+      </head>
+      <body>
+        <article>
+          <h1>Shop Product Heading</h1>
+          <p>Shop product details.</p>
+        </article>
+      </body>
+    </html>
+    """
+
     responses["/article-no-canonical"] = """
     <html>
       <head>
@@ -356,6 +371,13 @@ def http_server():
     responses["/sitemap-duplicates.xml"] = f"""<?xml version="1.0" encoding="UTF-8"?>
     <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
       <url><loc>{base_url}/article</loc></url>
+      <url><loc>{base_url}/article</loc></url>
+    </urlset>
+    """
+
+    responses["/sitemap-shop-skip.xml"] = f"""<?xml version="1.0" encoding="UTF-8"?>
+    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url><loc>{base_url}/shop/product</loc></url>
       <url><loc>{base_url}/article</loc></url>
     </urlset>
     """

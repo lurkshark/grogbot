@@ -312,70 +312,7 @@ class SearchService:
             END;
             """
         )
-        self._migrate_legacy_documents_table()
         self.connection.commit()
-
-    def _migrate_legacy_documents_table(self) -> None:
-        columns = {
-            row["name"]
-            for row in self.connection.execute("PRAGMA table_info(documents)").fetchall()
-        }
-        if "content_markdown" not in columns or "content_hash" in columns:
-            return
-
-        legacy_rows = self.connection.execute(
-            """
-            SELECT id, source_id, canonical_url, title, published_at, content_markdown
-            FROM documents
-            ORDER BY id
-            """
-        ).fetchall()
-
-        self.connection.commit()
-        self.connection.execute("PRAGMA foreign_keys = OFF")
-        try:
-            self.connection.execute("BEGIN")
-            self.connection.executescript(
-                """
-                ALTER TABLE documents RENAME TO documents_legacy;
-
-                CREATE TABLE documents (
-                    id TEXT PRIMARY KEY,
-                    source_id TEXT NOT NULL,
-                    canonical_url TEXT NOT NULL UNIQUE,
-                    title TEXT,
-                    published_at TEXT,
-                    content_hash TEXT NOT NULL
-                        CHECK (length(content_hash) = 6)
-                        CHECK (content_hash GLOB '[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'),
-                    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
-                );
-                """
-            )
-
-            for row in legacy_rows:
-                self.connection.execute(
-                    """
-                    INSERT INTO documents (id, source_id, canonical_url, title, published_at, content_hash)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        row["id"],
-                        row["source_id"],
-                        row["canonical_url"],
-                        row["title"],
-                        row["published_at"],
-                        _content_hash(row["content_markdown"]),
-                    ),
-                )
-
-            self.connection.execute("DROP TABLE documents_legacy")
-            self.connection.execute("COMMIT")
-        except Exception:
-            self.connection.execute("ROLLBACK")
-            raise
-        finally:
-            self.connection.execute("PRAGMA foreign_keys = ON")
 
     def upsert_source(self, canonical_domain: str, name: Optional[str] = None, rss_feed: Optional[str] = None) -> Source:
         canonical_domain = canonical_domain.strip().lower()

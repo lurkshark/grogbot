@@ -171,63 +171,6 @@ def test_documents_table_enforces_content_hash_shape(service: SearchService):
         )
 
 
-def test_legacy_documents_table_is_migrated_on_startup(tmp_path):
-    db_path = tmp_path / "legacy-search.db"
-    connection = sqlite3.connect(db_path)
-    connection.executescript(
-        """
-        CREATE TABLE sources (
-            id TEXT PRIMARY KEY,
-            canonical_domain TEXT NOT NULL UNIQUE,
-            name TEXT,
-            rss_feed TEXT
-        );
-
-        CREATE TABLE documents (
-            id TEXT PRIMARY KEY,
-            source_id TEXT NOT NULL,
-            canonical_url TEXT NOT NULL UNIQUE,
-            title TEXT,
-            published_at TEXT,
-            content_markdown TEXT NOT NULL,
-            FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
-        );
-        """
-    )
-    connection.execute(
-        "INSERT INTO sources (id, canonical_domain, name, rss_feed) VALUES (?, ?, ?, ?)",
-        ("source-1", "example.com", "Example", None),
-    )
-    connection.execute(
-        """
-        INSERT INTO documents (id, source_id, canonical_url, title, published_at, content_markdown)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (
-            "doc-1",
-            "source-1",
-            "https://example.com/legacy",
-            "Legacy",
-            None,
-            "legacy markdown",
-        ),
-    )
-    connection.commit()
-    connection.close()
-
-    with SearchService(db_path) as migrated_service:
-        columns = {
-            row["name"]
-            for row in migrated_service.connection.execute("PRAGMA table_info(documents)").fetchall()
-        }
-        assert "content_markdown" not in columns
-        assert "content_hash" in columns
-
-        document = migrated_service.get_document("doc-1")
-        assert document is not None
-        assert document.content_hash == service_module._content_hash("legacy markdown")
-
-
 def test_delete_document_cascades_chunks_and_vector_rows(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
     document = service.upsert_document(

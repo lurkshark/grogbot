@@ -19,7 +19,7 @@ def embed_texts(texts: Iterable[str], *, prompt: str) -> List[list[float]]:
     model = _load_model()
     embeddings = model.encode(
         text_list,
-        batch_size=16,
+        batch_size=8,
         normalize_embeddings=True,
         prompt=prompt,
     )

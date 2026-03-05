@@ -754,6 +754,8 @@ class SearchService:
         documents: List[Document] = []
         for page_url in unique_urls:
             canonical_url = _canonicalize_url(page_url)
+            if "/shop/" in urlparse(canonical_url).path:
+                continue
             if bootstrap:
                 existing = self.connection.execute(
                     "SELECT 1 FROM documents WHERE canonical_url = ? LIMIT 1",

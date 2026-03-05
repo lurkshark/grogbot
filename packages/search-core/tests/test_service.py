@@ -873,6 +873,13 @@ def test_create_documents_from_sitemap_deduplicates_urls(service: SearchService,
     assert documents[0].canonical_url == f"{http_server}/canonical"
 
 
+def test_create_documents_from_sitemap_skips_shop_paths(service: SearchService, http_server):
+    documents = service.create_documents_from_sitemap(f"{http_server}/sitemap-shop-skip.xml")
+
+    assert len(documents) == 1
+    assert documents[0].canonical_url == f"{http_server}/canonical"
+
+
 def test_create_documents_from_sitemap_invalid_xml_raises_value_error(service: SearchService, http_server):
     with pytest.raises(ValueError, match="Invalid sitemap XML"):
         service.create_documents_from_sitemap(f"{http_server}/invalid-sitemap.xml")

@@ -47,4 +47,4 @@ def test_embed_texts_calls_model_and_returns_lists(monkeypatch):
     result = embeddings.embed_texts(("first", "second"), prompt="search_query")
 
     assert result == [[1.0, 2.0], [3.0, 4.0]]
-    assert fake_model.calls == [(["first", "second"], 16, True, "search_query")]
+    assert fake_model.calls == [(["first", "second"], 8, True, "search_query")]

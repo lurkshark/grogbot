@@ -135,6 +135,24 @@ def test_upsert_document_without_content_change_preserves_existing_links(service
     assert [row["to_document_id"] for row in updated_links] == [row["to_document_id"] for row in original_links]
 
 
+def test_upsert_document_chunks_inline_heading_context(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    document = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/context",
+        title="Context",
+        published_at=None,
+        content_markdown="""# API
+
+## Auth
+
+token details
+""",
+    )
+
+    assert _chunk_texts(service, document.id) == ["API > Auth token details"]
+
+
 def test_upsert_document_rejects_empty_content(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
 

@@ -53,6 +53,10 @@ GET /search/query?q=hello+world
   - CLI (bulk): `grogbot search document embed-sync --maximum 100`
   - API: `POST /search/documents/embed`
   - API (bulk): `POST /search/documents/embed/sync`
+- SearchService embedding API uses canonical methods only:
+  - `embed_document_chunks(document_id)`
+  - `synchronize_document_embeddings(maximum=...)`
+  - Legacy aliases `chunk_document` and `synchronize_document_chunks` have been removed.
 
 ## Development
 

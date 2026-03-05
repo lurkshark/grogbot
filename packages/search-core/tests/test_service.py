@@ -76,7 +76,7 @@ def test_upsert_document_without_content_change_preserves_existing_chunks(servic
         published_at=None,
         content_markdown="stable body",
     )
-    service.chunk_document(document.id)
+    service.embed_document_chunks(document.id)
 
     original_chunk_rows = service.connection.execute(
         "SELECT id, content_text FROM chunks WHERE document_id = ? ORDER BY chunk_index",
@@ -180,7 +180,7 @@ def test_delete_document_cascades_chunks_and_vector_rows(service: SearchService)
         published_at=None,
         content_markdown="alpha beta gamma",
     )
-    service.chunk_document(document.id)
+    service.embed_document_chunks(document.id)
 
     assert service.delete_document(document.id) is True
     assert service.delete_document(document.id) is False
@@ -305,7 +305,7 @@ def test_statistics_missing_source_returns_zero(service: SearchService):
     assert stats.avg_documents_per_source == 0.0
 
 
-def test_chunk_document_returns_count(service: SearchService):
+def test_embed_document_chunks_returns_count(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
     document = service.upsert_document(
         source_id=source.id,
@@ -315,7 +315,7 @@ def test_chunk_document_returns_count(service: SearchService):
         content_markdown="Hello world",
     )
 
-    created = service.chunk_document(document.id)
+    created = service.embed_document_chunks(document.id)
 
     row = service.connection.execute(
         "SELECT COUNT(*) AS count FROM chunks WHERE document_id = ?",
@@ -325,12 +325,12 @@ def test_chunk_document_returns_count(service: SearchService):
     assert created > 0
 
 
-def test_chunk_document_missing_raises(service: SearchService):
+def test_embed_document_chunks_missing_raises(service: SearchService):
     with pytest.raises(DocumentNotFoundError):
-        service.chunk_document("missing-id")
+        service.embed_document_chunks("missing-id")
 
 
-def test_synchronize_document_chunks_respects_maximum(service: SearchService):
+def test_synchronize_document_embeddings_respects_maximum(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
     service.upsert_document(
         source_id=source.id,
@@ -347,7 +347,7 @@ def test_synchronize_document_chunks_respects_maximum(service: SearchService):
         content_markdown="second content",
     )
 
-    created = service.synchronize_document_chunks(maximum=1)
+    created = service.synchronize_document_embeddings(maximum=1)
     embedded_docs = service.connection.execute(
         """
         SELECT DISTINCT chunks.document_id
@@ -359,7 +359,7 @@ def test_synchronize_document_chunks_respects_maximum(service: SearchService):
     assert len(embedded_docs) == 1
     assert created > 0
 
-    service.synchronize_document_chunks()
+    service.synchronize_document_embeddings()
     embedded_docs = service.connection.execute(
         """
         SELECT DISTINCT chunks.document_id
@@ -371,7 +371,7 @@ def test_synchronize_document_chunks_respects_maximum(service: SearchService):
     assert len(embedded_docs) == 2
 
 
-def test_synchronize_document_chunks_non_positive_maximum_is_noop(service: SearchService):
+def test_synchronize_document_embeddings_non_positive_maximum_is_noop(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
     service.upsert_document(
         source_id=source.id,
@@ -381,15 +381,15 @@ def test_synchronize_document_chunks_non_positive_maximum_is_noop(service: Searc
         content_markdown="noop",
     )
 
-    assert service.synchronize_document_chunks(maximum=0) == 0
-    assert service.synchronize_document_chunks(maximum=-5) == 0
+    assert service.synchronize_document_embeddings(maximum=0) == 0
+    assert service.synchronize_document_embeddings(maximum=-5) == 0
     vector_count = service.connection.execute("SELECT COUNT(*) AS count FROM chunks_vec").fetchone()["count"]
     assert vector_count == 0
 
 
 # Link graph behavior
 
-def test_chunk_document_skips_same_domain_links_and_dedupes_cross_domain_targets(service: SearchService):
+def test_embed_document_chunks_skips_same_domain_links_and_dedupes_cross_domain_targets(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
     document = service.upsert_document(
         source_id=source.id,
@@ -404,7 +404,7 @@ def test_chunk_document_skips_same_domain_links_and_dedupes_cross_domain_targets
         ),
     )
 
-    service.chunk_document(document.id)
+    service.embed_document_chunks(document.id)
 
     links = service.connection.execute(
         """
@@ -425,7 +425,7 @@ def test_chunk_document_skips_same_domain_links_and_dedupes_cross_domain_targets
     )
 
 
-def test_chunk_document_resolves_relative_links_before_domain_filtering(service: SearchService):
+def test_embed_document_chunks_resolves_relative_links_before_domain_filtering(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
     document = service.upsert_document(
         source_id=source.id,
@@ -439,7 +439,7 @@ def test_chunk_document_resolves_relative_links_before_domain_filtering(service:
         ),
     )
 
-    service.chunk_document(document.id)
+    service.embed_document_chunks(document.id)
 
     links = service.connection.execute(
         "SELECT to_document_id FROM links WHERE from_document_id = ? ORDER BY to_document_id",
@@ -451,7 +451,7 @@ def test_chunk_document_resolves_relative_links_before_domain_filtering(service:
     ]
 
 
-def test_chunk_document_stores_unknown_targets_by_canonicalized_url(service: SearchService):
+def test_embed_document_chunks_stores_unknown_targets_by_canonicalized_url(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
     target_url = "https://external.site/not-ingested"
     document = service.upsert_document(
@@ -462,7 +462,7 @@ def test_chunk_document_stores_unknown_targets_by_canonicalized_url(service: Sea
         content_markdown=f"[unknown]({target_url})",
     )
 
-    service.chunk_document(document.id)
+    service.embed_document_chunks(document.id)
 
     link_row = service.connection.execute(
         "SELECT to_document_id FROM links WHERE from_document_id = ?",
@@ -486,7 +486,7 @@ def test_outbound_links_ignore_self_and_follow_content_delete_and_refresh_lifecy
         content_markdown=f"[self]({canonical_url}) [other](https://other.example/other)",
     )
 
-    service.chunk_document(document.id)
+    service.embed_document_chunks(document.id)
 
     links = service.connection.execute(
         "SELECT to_document_id FROM links WHERE from_document_id = ? ORDER BY to_document_id",
@@ -545,7 +545,7 @@ def test_rank_fusion_search_returns_results(service: SearchService):
         published_at=None,
         content_markdown="Hello world from the search system.",
     )
-    service.chunk_document(document.id)
+    service.embed_document_chunks(document.id)
 
     results = service.search("hello", limit=5)
 
@@ -564,7 +564,7 @@ def test_rank_fusion_scores_are_reciprocal_and_additive(service: SearchService):
             published_at=None,
             content_markdown="alpha alpha",
         )
-    service.synchronize_document_chunks()
+    service.synchronize_document_embeddings()
 
     results = service.search("alpha", limit=3)
 
@@ -589,7 +589,7 @@ def test_rank_fusion_zero_fills_missing_method_score(service: SearchService):
         published_at=None,
         content_markdown="alpha alpha",
     )
-    service.synchronize_document_chunks()
+    service.synchronize_document_embeddings()
 
     results = service.search("nonexistentterm", limit=5)
 
@@ -611,7 +611,7 @@ def test_search_respects_result_limit(service: SearchService):
             published_at=None,
             content_markdown="alpha",
         )
-    service.synchronize_document_chunks()
+    service.synchronize_document_embeddings()
 
     results = service.search("alpha", limit=2)
 
@@ -627,7 +627,7 @@ def test_search_returns_empty_for_blank_query_or_non_positive_limit(service: Sea
         published_at=None,
         content_markdown="hello world",
     )
-    service.chunk_document(document.id)
+    service.embed_document_chunks(document.id)
 
     assert service.search("   ", limit=5) == []
     assert service.search("hello", limit=0) == []
@@ -669,10 +669,10 @@ def test_search_includes_link_score_with_deterministic_ties_and_zero_fill(servic
         content_markdown=f"alpha [b]({doc_b.canonical_url}) [c]({doc_c.canonical_url})",
     )
 
-    service.chunk_document(doc_a.id)
-    service.chunk_document(doc_b.id)
-    service.chunk_document(doc_c.id)
-    service.chunk_document(doc_d.id)
+    service.embed_document_chunks(doc_a.id)
+    service.embed_document_chunks(doc_b.id)
+    service.embed_document_chunks(doc_c.id)
+    service.embed_document_chunks(doc_d.id)
 
     results = service.search("alpha", limit=4)
 
@@ -699,7 +699,7 @@ def test_search_result_model_dump_contains_link_score(service: SearchService):
         published_at=None,
         content_markdown="alpha",
     )
-    service.chunk_document(document.id)
+    service.embed_document_chunks(document.id)
 
     results = service.search("alpha", limit=1)
 
@@ -1097,7 +1097,7 @@ def test_search_skips_chunk_ids_missing_after_scoring(service: SearchService):
         published_at=None,
         content_markdown="alpha",
     )
-    service.synchronize_document_chunks()
+    service.synchronize_document_embeddings()
 
     real_connection = service.connection
 

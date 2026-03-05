@@ -3,6 +3,11 @@ from __future__ import annotations
 import grogbot_search.chunking as chunking
 
 
+def test_default_chunk_size_bounds():
+    assert chunking.TARGET_WORDS == 512
+    assert chunking.MAX_WORDS == 1024
+
+
 def test_split_sections_breaks_on_headings():
     markdown = """intro line
 # Heading One

@@ -47,7 +47,11 @@ GET /search/query?q=hello+world
 
 - `content_markdown` is accepted on upsert/ingest inputs, but it is **not persisted** in the `documents` table.
 - Documents now persist a compact `content_hash` (6-character lowercase hex digest).
+- URL and feed ingestion use a shared cleanup pipeline that aggressively removes scripts, widgets, unsafe links, malformed text noise, and other low-signal artifacts before chunk generation.
+- Chunk generation is prose-oriented and hard-bounded: semantic grouping is preserved when possible, but fallback splitting ensures persisted chunks stay within strict safety limits for embedding.
+- Outbound links are preserved from cleaned source content independently from prose pruning, so useful links can survive even when noisy text blocks are dropped.
 - Upsert/ingestion regenerates plaintext chunks and outbound links when content changes.
+- Re-ingest assumption: if chunking / cleanup behavior changes, rebuild the local corpus rather than expecting in-place migration of existing chunk rows.
 - Embeddings are generated explicitly:
   - CLI: `grogbot search document embed <document_id>`
   - CLI (bulk): `grogbot search document embed-sync --maximum 100`

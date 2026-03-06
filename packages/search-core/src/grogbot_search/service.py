@@ -4,6 +4,7 @@ import hashlib
 import html
 import re
 import time
+import unicodedata
 import pysqlite3 as sqlite3
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -14,12 +15,12 @@ from urllib.parse import parse_qs, urlencode, urlparse, urljoin, urlunparse
 
 import httpx
 import markdown
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 from dateutil import parser as date_parser
 from markdownify import markdownify as html_to_markdown
 from readability import Document as ReadabilityDocument
 
-from grogbot_search.chunking import chunk_markdown
+from grogbot_search.chunking import chunk_markdown, markdown_to_text
 from grogbot_search.embeddings import embed_texts
 from grogbot_search.ids import document_id_for_url, source_id_for_domain
 from grogbot_search.models import Chunk, DatasetStatistics, Document, SearchResult, Source
@@ -140,26 +141,172 @@ def _dedupe_urls(urls: Iterable[str]) -> List[str]:
     return unique_urls
 
 
-def _extract_markdown_links(content_markdown: str) -> List[str]:
-    rendered_html = markdown.markdown(content_markdown)
-    soup = BeautifulSoup(rendered_html, "html.parser")
+@dataclass
+class CleanedContent:
+    html: str
+    markdown: str
+
+
+def _normalize_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", html.unescape(value or ""))
+    normalized = normalized.replace("\u00a0", " ")
+    normalized = normalized.replace("\u200b", "")
+    normalized = normalized.replace("\ufeff", "")
+    normalized = "".join(
+        char for char in normalized if char in "\n\t" or unicodedata.category(char)[0] != "C"
+    )
+    normalized = re.sub(r"[ \t\r\f\v]+", " ", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
+
+
+def _is_eligible_link_href(href: str) -> bool:
+    href = _canonicalize_url(href)
+    if not href or href.startswith("#"):
+        return False
+
+    parsed = urlparse(href)
+    if parsed.scheme and parsed.scheme.lower() not in {"http", "https"}:
+        return False
+    return True
+
+
+def _strip_empty_tags(soup: BeautifulSoup) -> None:
+    for tag in list(soup.find_all(True)):
+        if tag.name == "a":
+            continue
+        if tag.find(True):
+            continue
+        if tag.get_text(" ", strip=True):
+            continue
+        tag.decompose()
+
+
+def _sanitize_content_html(content_html: str) -> str:
+    soup = BeautifulSoup(content_html or "", "html.parser")
+
+    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+        comment.extract()
+
+    removable_tags = {
+        "script",
+        "style",
+        "noscript",
+        "iframe",
+        "svg",
+        "canvas",
+        "form",
+        "input",
+        "button",
+        "select",
+        "option",
+        "textarea",
+        "nav",
+        "footer",
+        "header",
+        "aside",
+    }
+    for tag in list(soup.find_all(removable_tags)):
+        tag.decompose()
+
+    negative_hint = re.compile(
+        r"\b(nav|footer|header|sidebar|breadcrumb|comment|share|social|widget|menu|promo|advert)\b",
+        re.IGNORECASE,
+    )
+
+    for tag in list(soup.find_all(True)):
+        attr_values = " ".join(
+            value if isinstance(value, str) else " ".join(value)
+            for key, value in tag.attrs.items()
+            if key in {"class", "id", "role", "aria-label"}
+        )
+        if tag.name in {"div", "section"} and negative_hint.search(attr_values):
+            tag.decompose()
+            continue
+
+        if tag.name == "a":
+            href = _canonicalize_url(str(tag.get("href") or ""))
+            if _is_eligible_link_href(href):
+                tag.attrs = {"href": href}
+            else:
+                tag.attrs = {}
+        else:
+            tag.attrs = {}
+
+    for text_node in list(soup.find_all(string=True)):
+        normalized = _normalize_text(str(text_node))
+        if normalized:
+            text_node.replace_with(normalized)
+        else:
+            text_node.extract()
+
+    _strip_empty_tags(soup)
+    cleaned_html = str(soup)
+    return _normalize_text(cleaned_html)
+
+
+def _is_low_signal_markdown_block(block: str) -> bool:
+    text = _normalize_text(markdown_to_text(block))
+    if not text:
+        return True
+
+    words = text.split()
+    if not words:
+        return True
+
+    alpha_chars = sum(char.isalpha() for char in text)
+    non_space_chars = sum(not char.isspace() for char in text)
+    alpha_ratio = (alpha_chars / non_space_chars) if non_space_chars else 0.0
+    sentence_markers = len(re.findall(r"[.!?]", text))
+    long_tokens = sum(len(word) > 40 for word in words)
+
+    if long_tokens >= 6:
+        return True
+    if len(words) >= 60 and sentence_markers == 0:
+        return True
+    if len(words) >= 80 and alpha_ratio < 0.55:
+        return True
+    return False
+
+
+def _filter_markdown_for_prose(content_markdown: str) -> str:
+    normalized_markdown = _normalize_text(content_markdown)
+    if not normalized_markdown:
+        return ""
+
+    blocks: List[str] = []
+    for block in re.split(r"\n\s*\n", normalized_markdown):
+        stripped = block.strip()
+        if not stripped:
+            continue
+        if stripped.lstrip().startswith("#"):
+            blocks.append(stripped)
+            continue
+        if _is_low_signal_markdown_block(stripped):
+            continue
+        blocks.append(stripped)
+    return "\n\n".join(blocks).strip()
+
+
+def _extract_html_links(content_html: str) -> List[str]:
+    soup = BeautifulSoup(content_html, "html.parser")
     links: List[str] = []
     for anchor in soup.find_all("a", href=True):
         href = _canonicalize_url(str(anchor.get("href") or ""))
-        if href:
+        if _is_eligible_link_href(href):
             links.append(href)
     return links
 
 
-def _to_document_ids_from_markdown(
+def _to_document_ids_from_html(
     *,
     source_document_id: str,
     source_canonical_url: str,
-    content_markdown: str,
+    content_html: str,
 ) -> set[str]:
     to_document_ids: set[str] = set()
     source_domain = _normalize_domain(_canonicalize_url(source_canonical_url))
-    for href in _extract_markdown_links(content_markdown):
+    for href in _extract_html_links(content_html):
         resolved_url = _canonicalize_url(urljoin(source_canonical_url, href))
         if not resolved_url:
             continue
@@ -170,6 +317,16 @@ def _to_document_ids_from_markdown(
             continue
         to_document_ids.add(to_document_id)
     return to_document_ids
+
+
+def _prepare_ingested_content(raw_content_html: str) -> CleanedContent:
+    cleaned_html = _sanitize_content_html(raw_content_html)
+    content_markdown = _filter_markdown_for_prose(html_to_markdown(cleaned_html))
+    if not content_markdown or not content_markdown.strip():
+        raise ValueError("Empty content")
+    if not chunk_markdown(content_markdown):
+        raise ValueError("Empty content")
+    return CleanedContent(html=cleaned_html, markdown=content_markdown)
 
 
 def _parse_datetime(value: Optional[str]) -> Optional[datetime]:
@@ -369,6 +526,8 @@ class SearchService:
         title: Optional[str],
         published_at: Optional[datetime],
         content_markdown: str,
+        *,
+        content_html_for_links: Optional[str] = None,
     ) -> Document:
         if not content_markdown or not content_markdown.strip():
             raise ValueError("content_markdown cannot be empty")
@@ -424,6 +583,7 @@ class SearchService:
                 document_id=document_id,
                 source_canonical_url=canonical_url,
                 content_markdown=content_markdown,
+                content_html=content_html_for_links,
             )
 
         self.connection.commit()
@@ -596,12 +756,27 @@ class SearchService:
             total_created += self.embed_document_chunks(row["id"])
         return total_created
 
-    def _insert_document_links(self, *, document_id: str, source_canonical_url: str, content_markdown: str) -> None:
-        to_document_ids = _to_document_ids_from_markdown(
-            source_document_id=document_id,
-            source_canonical_url=source_canonical_url,
-            content_markdown=content_markdown,
-        )
+    def _insert_document_links(
+        self,
+        *,
+        document_id: str,
+        source_canonical_url: str,
+        content_markdown: str,
+        content_html: Optional[str] = None,
+    ) -> None:
+        if content_html is not None:
+            to_document_ids = _to_document_ids_from_html(
+                source_document_id=document_id,
+                source_canonical_url=source_canonical_url,
+                content_html=content_html,
+            )
+        else:
+            rendered_html = markdown.markdown(content_markdown)
+            to_document_ids = _to_document_ids_from_html(
+                source_document_id=document_id,
+                source_canonical_url=source_canonical_url,
+                content_html=rendered_html,
+            )
         for to_document_id in sorted(to_document_ids):
             self.connection.execute(
                 "INSERT OR IGNORE INTO links (from_document_id, to_document_id) VALUES (?, ?)",
@@ -636,9 +811,10 @@ class SearchService:
             source = self.upsert_source(canonical_domain=canonical_domain, name=None, rss_feed=None)
         readable = ReadabilityDocument(html)
         content_html = readable.summary()
-        content_markdown = html_to_markdown(content_html)
-        if not content_markdown or not content_markdown.strip():
-            raise ValueError(f"Empty content for URL {canonical_url}")
+        try:
+            cleaned_content = _prepare_ingested_content(content_html)
+        except ValueError as exc:
+            raise ValueError(f"Empty content for URL {canonical_url}") from exc
         title = readable.short_title() or None
         published_at = _extract_published_at(html)
         return self.upsert_document(
@@ -646,7 +822,8 @@ class SearchService:
             canonical_url=canonical_url,
             title=title,
             published_at=published_at,
-            content_markdown=content_markdown,
+            content_markdown=cleaned_content.markdown,
+            content_html_for_links=cleaned_content.html,
         )
 
     def create_documents_from_feed(self, feed_url: str, paginate: bool = False) -> List[Document]:
@@ -741,8 +918,9 @@ class SearchService:
                     if entry.get("content"):
                         content = entry.content[0].value
                     content = content or entry.get("summary") or ""
-                    content_markdown = html_to_markdown(content)
-                    if not content_markdown or not content_markdown.strip():
+                    try:
+                        cleaned_content = _prepare_ingested_content(content)
+                    except ValueError:
                         continue
                     title = entry.get("title")
                     published_at = _parse_datetime(entry.get("published") or entry.get("updated"))
@@ -752,7 +930,8 @@ class SearchService:
                             canonical_url=canonical_url,
                             title=title,
                             published_at=published_at,
-                            content_markdown=content_markdown,
+                            content_markdown=cleaned_content.markdown,
+                            content_html_for_links=cleaned_content.html,
                         )
                     )
 

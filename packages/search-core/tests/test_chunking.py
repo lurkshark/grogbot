@@ -6,6 +6,7 @@ import grogbot_search.chunking as chunking
 def test_default_chunk_size_bounds():
     assert chunking.TARGET_WORDS == 512
     assert chunking.MAX_WORDS == 1024
+    assert chunking.MAX_CHARS == 4096
 
 
 def test_split_sections_breaks_on_headings():
@@ -95,7 +96,7 @@ def test_chunk_markdown_skips_heading_only_sections():
     assert chunks == []
 
 
-def test_chunk_markdown_context_words_do_not_count_toward_max(monkeypatch):
+def test_chunk_markdown_context_counts_toward_hard_limit(monkeypatch):
     monkeypatch.setattr(chunking, "TARGET_WORDS", 100)
     monkeypatch.setattr(chunking, "MAX_WORDS", 4)
 
@@ -106,8 +107,13 @@ one two three four
 
     chunks = chunking.chunk_markdown(markdown)
 
-    assert chunks == ["very long heading context for this section one two three four"]
-    assert chunking._word_count(chunks[0]) > chunking.MAX_WORDS
+    assert chunks == [
+        "very long heading one",
+        "very long heading two",
+        "very long heading three",
+        "very long heading four",
+    ]
+    assert all(chunking._word_count(chunk) <= chunking.MAX_WORDS for chunk in chunks)
 
 
 def test_chunk_markdown_splits_oversized_block_by_sentences_with_context(monkeypatch):
@@ -125,7 +131,8 @@ one two three. four five six. seven eight nine.
 
     assert chunks == [
         "Heading preface words",
-        "Heading one two three. four five six.",
+        "Heading one two three.",
+        "Heading four five six.",
         "Heading seven eight nine.",
     ]
 
@@ -170,3 +177,46 @@ four five
     chunks = chunking.chunk_markdown(markdown)
 
     assert chunks == ["one two three", "four five"]
+
+
+def test_chunk_markdown_splits_single_sentence_block_by_word_window(monkeypatch):
+    monkeypatch.setattr(chunking, "TARGET_WORDS", 100)
+    monkeypatch.setattr(chunking, "MAX_WORDS", 5)
+
+    markdown = """# Heading
+
+one two three four five six seven eight nine ten eleven
+"""
+
+    chunks = chunking.chunk_markdown(markdown)
+
+    assert chunks == [
+        "Heading one two three four",
+        "Heading five six seven eight",
+        "Heading nine ten eleven",
+    ]
+    assert all(chunking._word_count(chunk) <= chunking.MAX_WORDS for chunk in chunks)
+
+
+def test_chunk_markdown_enforces_char_limit_with_hard_fallback(monkeypatch):
+    monkeypatch.setattr(chunking, "TARGET_WORDS", 100)
+    monkeypatch.setattr(chunking, "MAX_WORDS", 100)
+    monkeypatch.setattr(chunking, "MAX_CHARS", 20)
+
+    markdown = """abcdefghij klmnopqrst uvwxyz"""
+
+    chunks = chunking.chunk_markdown(markdown)
+
+    assert chunks == ["abcdefghij", "klmnopqrst uvwxyz"]
+    assert all(len(chunk) <= chunking.MAX_CHARS for chunk in chunks)
+
+
+def test_chunk_markdown_drops_low_signal_oversized_block(monkeypatch):
+    monkeypatch.setattr(chunking, "TARGET_WORDS", 100)
+    monkeypatch.setattr(chunking, "MAX_WORDS", 20)
+
+    markdown = """BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY BUY"""
+
+    chunks = chunking.chunk_markdown(markdown)
+
+    assert chunks == []

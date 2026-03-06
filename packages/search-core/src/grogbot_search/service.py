@@ -215,10 +215,11 @@ def _sanitize_content_html(content_html: str) -> str:
     )
 
     for tag in list(soup.find_all(True)):
+        attrs = tag.attrs if getattr(tag, "attrs", None) else {}
         attr_values = " ".join(
-            value if isinstance(value, str) else " ".join(value)
-            for key, value in tag.attrs.items()
-            if key in {"class", "id", "role", "aria-label"}
+            value if isinstance(value, str) else " ".join(str(item) for item in value)
+            for key, value in attrs.items()
+            if key in {"class", "id", "role", "aria-label"} and value is not None
         )
         if tag.name in {"div", "section"} and negative_hint.search(attr_values):
             tag.decompose()

@@ -883,6 +883,23 @@ def test_create_documents_from_feed_uses_shared_cleanup_pipeline(service: Search
     ]
 
 
+def test_sanitize_content_html_tolerates_tags_with_none_attrs(monkeypatch):
+    real_beautiful_soup = service_module.BeautifulSoup
+
+    def fake_beautiful_soup(*args, **kwargs):
+        soup = real_beautiful_soup(*args, **kwargs)
+        paragraph = soup.find("p")
+        assert paragraph is not None
+        paragraph.attrs = None
+        return soup
+
+    monkeypatch.setattr(service_module, "BeautifulSoup", fake_beautiful_soup)
+
+    cleaned = service_module._sanitize_content_html("<p>Hello world.</p>")
+
+    assert cleaned == "<p>Hello world.</p>"
+
+
 @pytest.mark.parametrize(
     "path",
     [

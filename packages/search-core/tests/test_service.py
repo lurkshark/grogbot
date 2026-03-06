@@ -803,6 +803,86 @@ def test_create_document_from_url_extracts_published_time_metadata(service: Sear
     assert document.published_at == datetime(2025, 1, 9, 14, 30, tzinfo=timezone.utc)
 
 
+def test_create_document_from_url_cleans_noisy_content_and_preserves_cleaned_links(
+    service: SearchService,
+    http_server,
+):
+    document = service.create_document_from_url(f"{http_server}/article-noisy")
+
+    chunk_text = " ".join(_chunk_texts(service, document.id))
+    assert "console.log" not in chunk_text
+    assert "BUY BUY BUY" not in chunk_text
+    assert "Odd spacing and text cleanup." in chunk_text
+    assert "Readable prose with a kept link" in chunk_text
+
+    links = service.connection.execute(
+        "SELECT to_document_id FROM links WHERE from_document_id = ? ORDER BY to_document_id",
+        (document.id,),
+    ).fetchall()
+
+    assert [row["to_document_id"] for row in links] == sorted(
+        [
+            service_module.document_id_for_url("https://external.example/kept"),
+            service_module.document_id_for_url("https://external.example/preserved-from-dropped"),
+            service_module.document_id_for_url("http://external.example/from-relative"),
+        ]
+    )
+
+
+def test_create_document_from_url_rejects_empty_after_cleanup(service: SearchService, http_server):
+    with pytest.raises(ValueError, match="Empty content"):
+        service.create_document_from_url(f"{http_server}/article-low-signal-only")
+
+
+def test_create_documents_from_feed_uses_shared_cleanup_pipeline(service: SearchService, monkeypatch):
+    class Entry(dict):
+        def __getattr__(self, item):
+            try:
+                return self[item]
+            except KeyError as exc:  # pragma: no cover - parity with dict attribute lookup
+                raise AttributeError(item) from exc
+
+    parsed = SimpleNamespace(
+        feed={"title": "Shared Cleanup Feed"},
+        entries=[
+            Entry(
+                title="Cleaned Feed Entry",
+                link="https://feed.example/entry",
+                content=[
+                    SimpleNamespace(
+                        value=(
+                            "<p>Hello\u200b world.</p>"
+                            "<p>" + " ".join(["BUY"] * 70) + " "
+                            '<a href="https://external.example/feed-dropped">drop-link</a></p>'
+                            '<script>console.log("noise")</script>'
+                        )
+                    )
+                ],
+            )
+        ],
+        status=200,
+        bozo=0,
+    )
+
+    monkeypatch.setattr("feedparser.parse", lambda _url: parsed)
+
+    documents = service.create_documents_from_feed("https://feed.example/rss")
+
+    assert len(documents) == 1
+    chunk_text = " ".join(_chunk_texts(service, documents[0].id))
+    assert "Hello world." in chunk_text
+    assert "console.log" not in chunk_text
+    assert "BUY BUY BUY" not in chunk_text
+
+    links = service.connection.execute(
+        "SELECT to_document_id FROM links WHERE from_document_id = ?",
+        (documents[0].id,),
+    ).fetchall()
+    assert [row["to_document_id"] for row in links] == [
+        service_module.document_id_for_url("https://external.example/feed-dropped")
+    ]
+
+
 @pytest.mark.parametrize(
     "path",
     [

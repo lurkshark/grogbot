@@ -159,6 +159,44 @@ def http_server():
     </html>
     """
 
+    noisy_words = " ".join(["BUY"] * 70)
+    responses["/article-noisy"] = f"""
+    <html>
+      <head>
+        <title>Noisy Article</title>
+        <link rel="canonical" href="{base_url}/canonical-noisy" />
+      </head>
+      <body>
+        <article>
+          <nav>navigation links</nav>
+          <h1>Noisy Heading</h1>
+          <p>Readable prose with a <a href="https://external.example/kept">kept link</a>.</p>
+          <p>{noisy_words} <a href="https://external.example/preserved-from-dropped">dropped-link</a></p>
+          <p><a href="//external.example/from-relative">protocol relative</a></p>
+          <p><a href="javascript:alert('xss')">unsafe</a></p>
+          <script>console.log('noise')</script>
+          <!-- hidden comment -->
+          <p>Odd\u200b spacing and\u00a0text cleanup.</p>
+        </article>
+      </body>
+    </html>
+    """
+
+    responses["/article-low-signal-only"] = f"""
+    <html>
+      <head>
+        <title>Low Signal</title>
+        <link rel="canonical" href="{base_url}/canonical-low-signal" />
+      </head>
+      <body>
+        <article>
+          <p>{noisy_words}</p>
+          <script>console.log('noise')</script>
+        </article>
+      </body>
+    </html>
+    """
+
     responses["/feed"] = f"""
     <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
       <channel>

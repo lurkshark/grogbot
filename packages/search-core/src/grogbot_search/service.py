@@ -1080,21 +1080,47 @@ class SearchService:
                     1.0 / (1 + row_number() OVER (ORDER BY inbound_count DESC, document_id ASC)) AS link_score
                 FROM candidate_inbound_links
                 WHERE inbound_count > 0
+            ),
+            scored_chunks AS (
+                SELECT
+                    all_chunk_ids.chunk_id,
+                    chunks.document_id,
+                    COALESCE(fts_ranked.fts_score, 0.0) AS fts_score,
+                    COALESCE(vec_ranked.vector_score, 0.0) AS vector_score,
+                    COALESCE(link_ranked.link_score, 0.0) AS link_score,
+                    COALESCE(fts_ranked.fts_score, 0.0)
+                        + COALESCE(vec_ranked.vector_score, 0.0)
+                        + COALESCE(link_ranked.link_score, 0.0) AS final_score
+                FROM all_chunk_ids
+                JOIN chunks ON chunks.id = all_chunk_ids.chunk_id
+                LEFT JOIN fts_ranked ON fts_ranked.chunk_id = all_chunk_ids.chunk_id
+                LEFT JOIN vec_ranked ON vec_ranked.chunk_id = all_chunk_ids.chunk_id
+                LEFT JOIN link_ranked ON link_ranked.document_id = chunks.document_id
+            ),
+            representative_chunks AS (
+                SELECT
+                    chunk_id,
+                    document_id,
+                    fts_score,
+                    vector_score,
+                    link_score,
+                    final_score,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY document_id
+                        ORDER BY final_score DESC, chunk_id ASC
+                    ) AS document_rank
+                FROM scored_chunks
             )
             SELECT
-                all_chunk_ids.chunk_id,
-                COALESCE(fts_ranked.fts_score, 0.0) AS fts_score,
-                COALESCE(vec_ranked.vector_score, 0.0) AS vector_score,
-                COALESCE(link_ranked.link_score, 0.0) AS link_score,
-                COALESCE(fts_ranked.fts_score, 0.0)
-                    + COALESCE(vec_ranked.vector_score, 0.0)
-                    + COALESCE(link_ranked.link_score, 0.0) AS final_score
-            FROM all_chunk_ids
-            JOIN chunks ON chunks.id = all_chunk_ids.chunk_id
-            LEFT JOIN fts_ranked ON fts_ranked.chunk_id = all_chunk_ids.chunk_id
-            LEFT JOIN vec_ranked ON vec_ranked.chunk_id = all_chunk_ids.chunk_id
-            LEFT JOIN link_ranked ON link_ranked.document_id = chunks.document_id
-            ORDER BY final_score DESC, all_chunk_ids.chunk_id ASC
+                chunk_id,
+                document_id,
+                fts_score,
+                vector_score,
+                link_score,
+                final_score
+            FROM representative_chunks
+            WHERE document_rank = 1
+            ORDER BY final_score DESC, chunk_id ASC
             LIMIT ?
             """,
             (

@@ -572,6 +572,110 @@ def test_rank_fusion_search_returns_results(service: SearchService):
     assert "hello" in results[0].chunk.content_text.lower()
 
 
+def test_search_returns_each_document_once_when_multiple_chunks_match(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    repeated_document = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/repeated",
+        title="Repeated",
+        published_at=None,
+        content_markdown="# First\nalpha alpha alpha\n\n# Second\nalpha",
+    )
+    other_document = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/other",
+        title="Other",
+        published_at=None,
+        content_markdown="alpha",
+    )
+    service.synchronize_document_embeddings()
+
+    assert len(_chunk_texts(service, repeated_document.id)) == 2
+
+    results = service.search("alpha", limit=5)
+
+    assert [result.document.id for result in results].count(repeated_document.id) == 1
+    assert len({result.document.id for result in results}) == len(results)
+    assert {result.document.id for result in results} == {repeated_document.id, other_document.id}
+
+
+def test_search_limit_counts_unique_documents(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/dominant",
+        title="Dominant",
+        published_at=None,
+        content_markdown="# One\nalpha alpha alpha\n\n# Two\nalpha alpha\n\n# Three\nalpha",
+    )
+    service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/second",
+        title="Second",
+        published_at=None,
+        content_markdown="alpha",
+    )
+    service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/third",
+        title="Third",
+        published_at=None,
+        content_markdown="alpha",
+    )
+    service.synchronize_document_embeddings()
+
+    all_results = service.search("alpha", limit=5)
+    limited_results = service.search("alpha", limit=2)
+
+    assert len(all_results) == 3
+    assert len(limited_results) == 2
+    assert len({result.document.id for result in limited_results}) == 2
+    assert [result.document.id for result in limited_results] == [
+        result.document.id for result in all_results[:2]
+    ]
+
+
+def test_search_uses_highest_ranked_chunk_as_document_representative(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    document = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/representative",
+        title="Representative",
+        published_at=None,
+        content_markdown="# Strong\nalpha alpha alpha\n\n# Weak\nalpha",
+    )
+    service.synchronize_document_embeddings()
+
+    results = service.search("alpha", limit=5)
+
+    assert len(results) == 1
+    assert results[0].document.id == document.id
+    assert results[0].chunk.content_text == "Strong alpha alpha alpha"
+
+
+def test_search_uses_lowest_chunk_id_when_document_chunks_tie(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    document = service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/tied-representative",
+        title="Tied Representative",
+        published_at=None,
+        content_markdown="# First\nalpha\n\n# Second\nalpha",
+    )
+    service.synchronize_document_embeddings()
+
+    chunk_rows = service.connection.execute(
+        "SELECT id, content_text FROM chunks WHERE document_id = ? ORDER BY chunk_index",
+        (document.id,),
+    ).fetchall()
+
+    results = service.search("alpha", limit=5)
+
+    assert len(results) == 1
+    assert results[0].chunk.id == chunk_rows[0]["id"]
+    assert results[0].chunk.content_text == chunk_rows[0]["content_text"]
+
+
 def test_rank_fusion_scores_are_reciprocal_and_additive(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
     for idx in range(3):

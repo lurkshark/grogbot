@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block body %}
+  <main class="shell shell--centered">
+    <section class="search-home">
+      <h1 class="search-home__title">Grogbot Search</h1>
+      <form class="search-form search-form--home" action="/search/query" method="get">
+        <label class="sr-only" for="search-query">Search query</label>
+        <input
+          id="search-query"
+          class="search-input"
+          type="text"
+          name="q"
+          value="{{ query }}"
+          autocomplete="off"
+        />
+        <button class="search-button" type="submit">Search</button>
+      </form>
+    </section>
+  </main>
+{% endblock %}

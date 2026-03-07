@@ -11,6 +11,7 @@ members = [
     "grogbot-api",
     "grogbot-cli",
     "grogbot-search-core",
+    "grogbot-web",
 ]
 
 [[package]]
@@ -363,6 +364,34 @@ requires-dist = [
     { name = "readability-lxml", specifier = ">=0.8" },
     { name = "sentence-transformers", specifier = ">=3.0" },
     { name = "sqlite-vec", specifier = ">=0.1" },
+]
+provides-extras = ["test"]
+
+[[package]]
+name = "grogbot-web"
+version = "0.1.0"
+source = { editable = "packages/web" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "grogbot-search-core" },
+    { name = "jinja2" },
+    { name = "uvicorn" },
+]
+
+[package.optional-dependencies]
+test = [
+    { name = "httpx" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.110" },
+    { name = "grogbot-search-core", editable = "packages/search-core" },
+    { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
+    { name = "jinja2", specifier = ">=3.1" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
+    { name = "uvicorn", specifier = ">=0.29" },
 ]
 provides-extras = ["test"]
 

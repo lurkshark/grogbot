@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from grogbot_search.models import Chunk, Document, SearchResult
 
-web_app_module = importlib.import_module("grogbot_web.app")
+app_module = importlib.import_module("grogbot_app.app")
 
 
 def _result(*, index: int, document_id: str, canonical_url: str, title: str | None, snippet: str) -> SearchResult:
@@ -36,7 +36,7 @@ def _result(*, index: int, document_id: str, canonical_url: str, title: str | No
 
 
 def test_root_page_renders_html():
-    with TestClient(web_app_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/")
 
     assert response.status_code == 200
@@ -47,7 +47,7 @@ def test_root_page_renders_html():
 
 
 def test_search_page_renders_form():
-    with TestClient(web_app_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/search")
 
     assert response.status_code == 200
@@ -58,7 +58,7 @@ def test_search_page_renders_form():
 
 
 def test_search_query_redirects_without_query():
-    with TestClient(web_app_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/search/query", follow_redirects=False)
 
     assert response.status_code == 302
@@ -66,7 +66,7 @@ def test_search_query_redirects_without_query():
 
 
 def test_search_query_redirects_blank_query():
-    with TestClient(web_app_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/search/query?q=%20%20%20", follow_redirects=False)
 
     assert response.status_code == 302
@@ -106,9 +106,9 @@ def test_search_query_renders_top_25_results_and_preserves_duplicates(monkeypatc
         captured.append((query, limit))
         return results[:limit]
 
-    monkeypatch.setattr(web_app_module, "search_results", fake_search_results)
+    monkeypatch.setattr(app_module, "search_results", fake_search_results)
 
-    with TestClient(web_app_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/search/query?q=hello+world")
 
     assert response.status_code == 200

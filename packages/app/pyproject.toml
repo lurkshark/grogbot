@@ -1,11 +1,11 @@
 [project]
-name = "grogbot-web"
+name = "grogbot-app"
 version = "0.1.0"
 description = "Grogbot Python-rendered web frontend"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.110",
-  "grogbot-search-core",
+  "grogbot-search",
   "jinja2>=3.1",
   "uvicorn>=0.29",
 ]
@@ -22,9 +22,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build]
 include = [
-  "src/grogbot_web/templates/*.html",
-  "src/grogbot_web/static/*.css",
+  "src/grogbot_app/templates/*.html",
+  "src/grogbot_app/static/*.css",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/grogbot_web"]
+packages = ["src/grogbot_app"]

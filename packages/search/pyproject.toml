@@ -1,5 +1,5 @@
 [project]
-name = "grogbot-search-core"
+name = "grogbot-search"
 version = "0.1.0"
 description = "Grogbot search core library"
 requires-python = ">=3.11"

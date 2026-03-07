@@ -1,12 +1,12 @@
 # Grogbot
 
-Grogbot is a uv-based Python monorepo for multiple systems. The first system, **search**, provides local storage and rank-fused search over markdown documents using FTS, vector, and link authority signals, exposed through both a CLI and a FastAPI service.
+Grogbot is a uv-based Python monorepo for multiple systems. The first system, **search**, provides local storage and rank-fused search over markdown documents using FTS, vector, and link authority signals, exposed through a CLI and a server-rendered FastAPI app.
 
 ## Packages
 
-- **`grogbot-search-core`** (`packages/search-core`): Core models, SQLite persistence, ingestion, chunking, embeddings, document-link graph storage, and three-signal rank-fused search.
+- **`grogbot-search`** (`packages/search`): Core models, SQLite persistence, ingestion, chunking, embeddings, document-link graph storage, and three-signal rank-fused search.
 - **`grogbot-cli`** (`packages/cli`): Typer-powered CLI (`grogbot`) that surfaces search functionality.
-- **`grogbot-api`** (`packages/api`): FastAPI app exposing the search system over HTTP.
+- **`grogbot-app`** (`packages/app`): FastAPI + Jinja browser app for the search system, with a landing page and server-rendered search UI.
 
 ## Configuration
 
@@ -27,21 +27,33 @@ grogbot search ingest-url https://example.com/article
 grogbot search query "hello world" --limit 5
 ```
 
-## API Usage
+## App Usage
 
-The FastAPI app lives in `grogbot_api.app:app` and exposes `/search` routes.
+The browser app lives in `grogbot_app.app:app`. It renders HTML directly from the same search database used by the CLI, so make sure you have already ingested content into your configured `db_path`.
 
-Examples:
+Run it locally with uvicorn:
 
 ```bash
-GET /search/sources
-POST /search/sources
-GET /search/documents/{document_id}
-POST /search/ingest/url
-POST /search/documents/embed
-POST /search/documents/embed/sync
+uv run --package grogbot-app uvicorn grogbot_app.app:app --reload
+```
+
+Then open `http://127.0.0.1:8000`.
+
+Useful routes:
+
+```bash
+GET /
+GET /search
 GET /search/query?q=hello+world
 ```
+
+Notes:
+
+- `/` is a simple Grogbot landing page.
+- `/search` shows the search form.
+- `/search/query` renders up to 25 server-side search results for the `q` parameter.
+- Static assets are served from `/assets`.
+- There is no standalone JSON HTTP API in the active workspace.
 
 ## Document storage and embedding workflow
 
@@ -56,27 +68,35 @@ GET /search/query?q=hello+world
   - CLI: `grogbot search document embed <document_id>`
   - CLI (bulk): `grogbot search document embed-sync --maximum 100`
     - Shows a live progress bar with elapsed time and ETA on stderr while preserving the final JSON result on stdout.
-  - API: `POST /search/documents/embed`
-  - API (bulk): `POST /search/documents/embed/sync`
 - SearchService embedding API uses canonical methods only:
   - `embed_document_chunks(document_id)`
   - `synchronize_document_embeddings(maximum=...)`
-    - Accepts an optional per-document progress callback so interactive callers can observe bulk embedding progress without moving CLI presentation logic into `search-core`.
+    - Accepts an optional per-document progress callback so interactive callers can observe bulk embedding progress without moving CLI presentation logic into `grogbot-search`.
   - Legacy aliases `chunk_document` and `synchronize_document_chunks` have been removed.
 
 ## Development
 
-Install test dependencies for the search core and run pytest:
+Install workspace dependencies:
 
 ```bash
 uv sync --extra test
-uv run pytest packages/search-core/tests
 ```
 
-Run coverage checks with `pytest-cov`:
+Run package tests:
 
 ```bash
-uv run --package grogbot-search-core --extra test \
-  pytest packages/search-core/tests \
+uv run --package grogbot-search --extra test pytest packages/search/tests
+uv run --package grogbot-app --extra test pytest packages/app/tests
+```
+
+Run coverage checks for the search package with `pytest-cov`:
+
+```bash
+uv run --package grogbot-search --extra test \
+  pytest packages/search/tests \
   --cov=grogbot_search --cov-report=term-missing
 ```
+
+## Historical note
+
+Archived OpenSpec artifacts may still reference the former `packages/search-core`, `packages/web`, and `packages/api` names. Those references describe the repository at the time those changes were authored and are not the current canonical package layout.

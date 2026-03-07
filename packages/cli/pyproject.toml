@@ -8,6 +8,11 @@ dependencies = [
   "typer>=0.12",
 ]
 
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0",
+]
+
 [project.scripts]
 grogbot = "grogbot_cli.app:app"
 

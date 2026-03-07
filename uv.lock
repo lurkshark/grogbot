@@ -314,11 +314,18 @@ dependencies = [
     { name = "typer" },
 ]
 
+[package.optional-dependencies]
+test = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "grogbot-search-core", editable = "packages/search-core" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
     { name = "typer", specifier = ">=0.12" },
 ]
+provides-extras = ["test"]
 
 [[package]]
 name = "grogbot-search-core"

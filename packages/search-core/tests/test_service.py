@@ -389,6 +389,58 @@ def test_synchronize_document_embeddings_respects_maximum(service: SearchService
     assert len(embedded_docs) == 2
 
 
+def test_synchronize_document_embeddings_reports_progress(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/first-progress",
+        title="First",
+        published_at=None,
+        content_markdown="first progress",
+    )
+    service.upsert_document(
+        source_id=source.id,
+        canonical_url="https://example.com/second-progress",
+        title="Second",
+        published_at=None,
+        content_markdown="second progress",
+    )
+
+    snapshots: list[dict[str, int]] = []
+    created = service.synchronize_document_embeddings(
+        progress_callback=lambda progress: snapshots.append(progress.model_dump())
+    )
+
+    assert created == 2
+    assert snapshots == [
+        {"total_documents": 2, "completed_documents": 0, "vectors_created": 0},
+        {"total_documents": 2, "completed_documents": 1, "vectors_created": 1},
+        {"total_documents": 2, "completed_documents": 2, "vectors_created": 2},
+    ]
+
+
+def test_synchronize_document_embeddings_progress_respects_maximum(service: SearchService):
+    source = service.upsert_source("example.com", name="Example")
+    for slug in ("first", "second", "third"):
+        service.upsert_document(
+            source_id=source.id,
+            canonical_url=f"https://example.com/{slug}-max-progress",
+            title=slug.title(),
+            published_at=None,
+            content_markdown=f"{slug} max progress",
+        )
+
+    snapshots: list[dict[str, int]] = []
+    created = service.synchronize_document_embeddings(
+        maximum=2,
+        progress_callback=lambda progress: snapshots.append(progress.model_dump()),
+    )
+
+    assert created == 2
+    assert snapshots[0] == {"total_documents": 2, "completed_documents": 0, "vectors_created": 0}
+    assert snapshots[-1] == {"total_documents": 2, "completed_documents": 2, "vectors_created": 2}
+
+
 def test_synchronize_document_embeddings_non_positive_maximum_is_noop(service: SearchService):
     source = service.upsert_source("example.com", name="Example")
     service.upsert_document(

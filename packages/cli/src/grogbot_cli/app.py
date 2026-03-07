@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -14,7 +15,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python <3.11
 import typer
 from dateutil import parser as date_parser
 
-from grogbot_search import DocumentNotFoundError, SearchService, load_config
+from grogbot_search import DocumentNotFoundError, EmbeddingSyncProgress, SearchService, load_config
 
 app = typer.Typer(no_args_is_help=True)
 search_app = typer.Typer(no_args_is_help=True)
@@ -63,6 +64,70 @@ def _load_bootstrap_sources(path: Path) -> list[dict[str, Optional[str]]]:
         sources.append({"sitemap": entry.get("sitemap"), "feed": entry.get("feed")})
 
     return sources
+
+
+def _format_duration(seconds: Optional[float]) -> str:
+    if seconds is None:
+        return "--:--"
+
+    total_seconds = max(0, int(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def _render_progress_bar(completed: int, total: int, *, width: int = 20) -> str:
+    if total <= 0:
+        filled = 0
+    else:
+        filled = min(width, int(width * (completed / total)))
+    return f"[{'#' * filled}{'-' * (width - filled)}]"
+
+
+def _embed_sync_progress_message(progress: EmbeddingSyncProgress, *, start_time: float) -> str:
+    elapsed_seconds = max(0.0, time.monotonic() - start_time)
+    remaining_documents = max(progress.total_documents - progress.completed_documents, 0)
+
+    eta_seconds: Optional[float] = None
+    if remaining_documents == 0:
+        eta_seconds = 0.0
+    elif progress.completed_documents > 0 and elapsed_seconds > 0:
+        documents_per_second = progress.completed_documents / elapsed_seconds
+        eta_seconds = remaining_documents / documents_per_second if documents_per_second > 0 else None
+
+    return (
+        f"{_render_progress_bar(progress.completed_documents, progress.total_documents)} "
+        f"{progress.completed_documents}/{progress.total_documents} documents "
+        f"elapsed {_format_duration(elapsed_seconds)} "
+        f"ETA {_format_duration(eta_seconds)}"
+    )
+
+
+def _write_progress_line(message: str, *, final: bool = False) -> None:
+    is_tty = sys.stderr.isatty()
+    prefix = "\r" if is_tty else ""
+    end = "" if is_tty and not final else "\n"
+    print(f"{prefix}{message}", file=sys.stderr, end=end, flush=True)
+
+
+def _embed_sync_progress_callback():
+    start_time = time.monotonic()
+    last_message: Optional[str] = None
+
+    def callback(progress: EmbeddingSyncProgress) -> None:
+        nonlocal last_message
+        if progress.total_documents <= 0:
+            return
+        last_message = _embed_sync_progress_message(progress, start_time=start_time)
+        _write_progress_line(last_message)
+
+    def finish() -> None:
+        if last_message is not None and sys.stderr.isatty():
+            _write_progress_line(last_message, final=True)
+
+    return callback, finish
 
 
 @source_app.command("upsert")
@@ -158,8 +223,12 @@ def document_embed(document_id: str = typer.Argument(..., help="Document ID")):
 
 @document_app.command("embed-sync")
 def document_embed_sync(maximum: Optional[int] = typer.Option(None, "--maximum")):
+    progress_callback, finish_progress = _embed_sync_progress_callback()
     with _service() as service:
-        count = service.synchronize_document_embeddings(maximum=maximum)
+        try:
+            count = service.synchronize_document_embeddings(maximum=maximum, progress_callback=progress_callback)
+        finally:
+            finish_progress()
     typer.echo(_dump({"vectors_created": count}))
 
 

@@ -55,11 +55,13 @@ GET /search/query?q=hello+world
 - Embeddings are generated explicitly:
   - CLI: `grogbot search document embed <document_id>`
   - CLI (bulk): `grogbot search document embed-sync --maximum 100`
+    - Shows a live progress bar with elapsed time and ETA on stderr while preserving the final JSON result on stdout.
   - API: `POST /search/documents/embed`
   - API (bulk): `POST /search/documents/embed/sync`
 - SearchService embedding API uses canonical methods only:
   - `embed_document_chunks(document_id)`
   - `synchronize_document_embeddings(maximum=...)`
+    - Accepts an optional per-document progress callback so interactive callers can observe bulk embedding progress without moving CLI presentation logic into `search-core`.
   - Legacy aliases `chunk_document` and `synchronize_document_chunks` have been removed.
 
 ## Development

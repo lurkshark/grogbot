@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Callable, Iterable, List, Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urljoin, urlunparse
 
 import httpx
@@ -23,7 +23,7 @@ from readability import Document as ReadabilityDocument
 from grogbot_search.chunking import chunk_markdown, markdown_to_text
 from grogbot_search.embeddings import embed_texts
 from grogbot_search.ids import document_id_for_url, source_id_for_domain
-from grogbot_search.models import Chunk, DatasetStatistics, Document, SearchResult, Source
+from grogbot_search.models import Chunk, DatasetStatistics, Document, EmbeddingSyncProgress, SearchResult, Source
 
 
 @dataclass
@@ -733,7 +733,11 @@ class SearchService:
         self.connection.commit()
         return len(rows)
 
-    def synchronize_document_embeddings(self, maximum: Optional[int] = None) -> int:
+    def synchronize_document_embeddings(
+        self,
+        maximum: Optional[int] = None,
+        progress_callback: Optional[Callable[[EmbeddingSyncProgress], None]] = None,
+    ) -> int:
         if maximum is not None and maximum <= 0:
             return 0
 
@@ -752,9 +756,30 @@ class SearchService:
             params = (maximum,)
         rows = self.connection.execute(query, params).fetchall()
 
+        total_documents = len(rows)
         total_created = 0
+        completed_documents = 0
+
+        if progress_callback is not None:
+            progress_callback(
+                EmbeddingSyncProgress(
+                    total_documents=total_documents,
+                    completed_documents=completed_documents,
+                    vectors_created=total_created,
+                )
+            )
+
         for row in rows:
             total_created += self.embed_document_chunks(row["id"])
+            completed_documents += 1
+            if progress_callback is not None:
+                progress_callback(
+                    EmbeddingSyncProgress(
+                        total_documents=total_documents,
+                        completed_documents=completed_documents,
+                        vectors_created=total_created,
+                    )
+                )
         return total_created
 
     def _insert_document_links(

@@ -49,3 +49,9 @@ class DatasetStatistics(BaseModel):
     avg_documents_per_source: float = Field(
         ..., description="Average number of documents per source."
     )
+
+
+class EmbeddingSyncProgress(BaseModel):
+    total_documents: int = Field(..., description="Total documents selected for this synchronization run.")
+    completed_documents: int = Field(..., description="Documents fully embedded so far in this run.")
+    vectors_created: int = Field(..., description="Cumulative vectors created so far in this run.")

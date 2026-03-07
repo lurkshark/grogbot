@@ -22,7 +22,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --package grogbot-search-core --extra test
+        run: uv sync --package grogbot-search --extra test
 
       - name: Run tests
-        run: uv run --package grogbot-search-core --extra test pytest packages/search-core/tests
+        run: uv run --package grogbot-search --extra test pytest packages/search/tests

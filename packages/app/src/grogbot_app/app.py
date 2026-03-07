@@ -12,7 +12,7 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = PACKAGE_DIR / "templates"
 STATIC_DIR = PACKAGE_DIR / "static"
 
-app = FastAPI(title="Grogbot Web")
+app = FastAPI(title="Grogbot App")
 app.mount("/assets", StaticFiles(directory=str(STATIC_DIR)), name="assets")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 

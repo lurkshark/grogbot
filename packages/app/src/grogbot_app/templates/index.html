@@ -1,13 +1,14 @@
 {% extends "base.html" %}
 
 {% block body %}
-  <main class="shell shell--centered">
-    <section class="card card--hero">
-      <p class="eyebrow">Grogbot</p>
-      <h1 class="hero-title">Grogbot</h1>
-      <p class="hero-copy">A home for Grogbot systems.</p>
+  <main class="page-shell page-shell--root">
+    <section class="compact-panel compact-panel--root">
+      <p class="section-label">Systems</p>
       <nav class="system-list" aria-label="Systems">
-        <a class="system-link" href="/search">Search</a>
+        <a class="system-link" href="/search">
+          <span class="system-link__title">Search</span>
+          <span class="system-link__meta">Open the search tool</span>
+        </a>
       </nav>
     </section>
   </main>

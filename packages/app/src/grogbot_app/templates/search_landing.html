@@ -1,10 +1,9 @@
 {% extends "base.html" %}
 
 {% block body %}
-  <main class="shell shell--centered">
-    <section class="search-home">
-      <h1 class="search-home__title">Grogbot Search</h1>
-      <form class="search-form search-form--home" action="/search/query" method="get">
+  <main class="page-shell page-shell--search">
+    <section class="compact-panel compact-panel--search">
+      <form class="search-form search-form--compact" action="/search/query" method="get">
         <label class="sr-only" for="search-query">Search query</label>
         <input
           id="search-query"
@@ -12,6 +11,7 @@
           type="text"
           name="q"
           value="{{ query }}"
+          placeholder="Search Grogbot"
           autocomplete="off"
         />
         <button class="search-button" type="submit">Search</button>

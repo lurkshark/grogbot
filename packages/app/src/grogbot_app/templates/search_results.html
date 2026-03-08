@@ -1,12 +1,9 @@
 {% extends "base.html" %}
 
 {% block body %}
-  <main class="results-shell">
-    <header class="results-header">
-      <div class="results-header__brand">
-        <a class="brand-link" href="/search">Grogbot Search</a>
-      </div>
-      <form class="search-form search-form--results" action="/search/query" method="get">
+  <main class="page-shell page-shell--results">
+    <header class="results-toolbar">
+      <form class="search-form search-form--compact" action="/search/query" method="get">
         <label class="sr-only" for="results-query">Search query</label>
         <input
           id="results-query"
@@ -14,6 +11,7 @@
           type="text"
           name="q"
           value="{{ query }}"
+          placeholder="Search Grogbot"
           autocomplete="off"
         />
         <button class="search-button" type="submit">Search</button>
@@ -30,7 +28,7 @@
                 {{ result.document.title or result.document.canonical_url }}
               </a>
             </h2>
-            <p class="search-result__snippet">{{ result.chunk.content_text }}</p>
+            <p class="search-result__snippet">{{ result.snippet_html }}</p>
           </article>
         {% endfor %}
       {% else %}

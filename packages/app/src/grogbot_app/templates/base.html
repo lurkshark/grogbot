@@ -7,6 +7,9 @@
     <link rel="stylesheet" href="{{ request.url_for('assets', path='app.css') }}" />
   </head>
   <body class="page-body">
+    <header class="app-topbar">
+      <a class="app-brand" href="/">Grogbot</a>
+    </header>
     {% block body %}{% endblock %}
   </body>
 </html>
